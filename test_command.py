@@ -1,5 +1,7 @@
 import requests
-from tratamento_response_IA import processar_resposta
+import asyncio
+import time
+from backend.src.tratamento_response_IA import processar_resposta
 
 # URL do webhook
 WEBHOOK_URL = "https://nery-automa-n8n.dlivfa.easypanel.host/webhook/test-message"
@@ -8,7 +10,7 @@ WEBHOOK_URL = "https://nery-automa-n8n.dlivfa.easypanel.host/webhook/test-messag
 respostaIA = None  
 
 def enviar_comando():
-    global respostaIA  # Permite modificar a variável global
+    global respostaIA  
 
     while True:
         comando = input("Digite o comando (ou 'sair' para encerrar): ").strip()
@@ -30,8 +32,16 @@ def enviar_comando():
             respostaIA = response.json()
             print("Resposta da IA recebida:", respostaIA)
 
-            # Chama a função de tratamento
-            processar_resposta(respostaIA)
+            # Marca o tempo inicial
+            inicio = time.perf_counter()
+
+            # Executa assincronamente
+            asyncio.run(processar_resposta(respostaIA))
+
+            # Marca o tempo final
+            fim = time.perf_counter()
+            duracao = fim - inicio
+            print(f"\n⏱️ Tempo total de execução: {duracao:.2f} segundos\n")
 
         except requests.exceptions.RequestException as e:
             print("Erro na requisição:", e)

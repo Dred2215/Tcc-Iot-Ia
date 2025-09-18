@@ -1,6 +1,6 @@
 
 # dispositivos_base.py
-from config_tuya import openapi
+from backend.src.config_tuya import openapi
 
 class DispositivoBase:
     def __init__(self, nome, device_id, openapi):

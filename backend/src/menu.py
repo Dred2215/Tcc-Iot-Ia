@@ -1,6 +1,6 @@
 # menu.py
 from dispositivos import Lampada, SensorPortao, ControleIRRF
-from config_tuya import openapi
+from src.config_tuya import openapi
 
 # IDs do JSON
 ID_LAMPADA = "eb20e4ad6247150831lufg"
