@@ -1,6 +1,6 @@
 import asyncio
-from .dispositivos import Lampada, Portao
-from .config_tuya import openapi, home_id
+from dispositivos import Lampada, Portao
+from config_tuya import openapi, home_id
 
 # Instâncias dos dispositivos
 DISPOSITIVOS = {
@@ -73,10 +73,9 @@ async def executar_comando(idx, cmd):
             if action == "definir_cor" and isinstance(parameter, str):
                 h, s, v = processar_cor(parameter)
                 metodo(h, s, v)
-            elif action in ("ajustar_brilho", "ajustar_temperatura") and parameter is not None:
+            # Verifica se o parâmetro existe e não é uma string vazia
+            elif parameter is not None and parameter != "":
                 metodo(int(parameter))
-            elif parameter is not None:
-                metodo(parameter)
             else:
                 metodo()
             print(f"[OK] {action} executado em {alvo_tipo} '{device}'.")
