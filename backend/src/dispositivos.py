@@ -7,6 +7,7 @@ class DispositivoBase:
         self.nome = nome
         self.device_id = device_id
         self.openapi = openapi
+        print(f"✅ Dispositivo '{self.nome}' (ID: {self.device_id}) inicializado.")
 
     def _executar(self, code, value):
         """Envia comando genérico para o dispositivo"""
