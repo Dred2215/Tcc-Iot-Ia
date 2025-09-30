@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from typing import Optional, Any
 import asyncio
 import json
-from tratamento_response_IA import processar_resposta
+from src.tratamento_response_IA import processar_resposta
 
 # # Importa a função do seu arquivo principal
 # from .tratamento_response_IA import teste_chamada_front
