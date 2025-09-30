@@ -1,0 +1,16 @@
+# Ignora a pasta de dependências, pois ela será instalada dentro do contêiner
+node_modules
+
+# Ignora a pasta de build local, se existir
+dist
+build
+
+# Ignora arquivos de log e de ambiente local
+.env
+.env.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Ignora o controle de versão
+.git
