@@ -9,9 +9,9 @@ from src.tratamento_response_IA import processar_resposta
 
 app = FastAPI()
 
-# 🔒 CORS fixo: só aceita chamadas do frontend homolog
+# 🔒 CORS fixo para homolog - apenas o frontend homolog pode acessar
 origins = [
-    "https://tcc-iot-frontend-homolog.dlivfa.easypanel.host, https://tcc-iot-backend-homolog.dlivfa.easypanel.host/notificar-mensagem-ia"
+    "https://tcc-iot-frontend-homolog.dlivfa.easypanel.host, http://tcc-iot-frontend-homolog.dlivfa.easypanel.host, https://tcc-iot-backend-homolog.dlivfa.easypanel.host/notificar-mensagem-ia, http://tcc-iot-backend-homolog.dlivfa.easypanel.host/notificar-mensagem-ia"
 ]
 
 app.add_middleware(
@@ -55,3 +55,9 @@ async def notificar_mensagem_ia(req: MensagemRequest):
 @app.middleware("http")
 async def log_requests(request, call_next):
     print(f"[LOG] {request.method} {request.url}")
+    response = await call_next(request)
+    return response
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
