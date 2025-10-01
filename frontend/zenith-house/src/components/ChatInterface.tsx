@@ -22,7 +22,7 @@ interface ChatMessageProps {
 }
 
 // 🔒 Endpoint fixo em localhost:8080 (ambiente de dev)
-const NOTIFY_ENDPOINT = "http://localhost:8080/notificar-mensagem-ia";
+const NOTIFY_ENDPOINT_DEV = "http://localhost:8080/notificar-mensagem-ia";
 
 
 const formatWebhookResponse = (data: unknown): string => {
@@ -191,7 +191,7 @@ export const ChatInterface = () => {
           const tipo = (webhookResponse as any)?.type ?? (command ? "IOT" : "general");
           const comandoStr =
             typeof command === "string" ? command : JSON.stringify(command ?? "");
-          await fetch(NOTIFY_ENDPOINT, {
+          await fetch(NOTIFY_ENDPOINT_DEV, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
