@@ -1,6 +1,6 @@
 import asyncio
-from src.dispositivos import Lampada, Portao
-from src.config_tuya import openapi, home_id
+from dispositivos import Lampada, Portao
+from config_tuya import openapi, home_id
 
 # Containers vazios (serão preenchidos na inicialização)
 DISPOSITIVOS = {}

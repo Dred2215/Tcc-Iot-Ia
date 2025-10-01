@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from contextlib import asynccontextmanager
 
 # 👉 Import ajustado (usa src.)
-from src.tratamento_response_IA import processar_resposta
+from tratamento_response_IA import processar_resposta
 
 # ✅ Ciclo de vida com logs
 @asynccontextmanager
