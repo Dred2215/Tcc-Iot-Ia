@@ -21,9 +21,8 @@ interface ChatMessageProps {
   message: Message;
 }
 
-// 🔒 Endpoint fixo no backend homolog
-const NOTIFY_ENDPOINT =
-  "https://tcc-iot-backend-homolog.dlivfa.easypanel.host/notificar-mensagem-ia";
+// 🔒 Endpoint fixo em localhost:8080 (ambiente de dev)
+const NOTIFY_ENDPOINT = "http://localhost:8080/notificar-mensagem-ia";
 
 
 const formatWebhookResponse = (data: unknown): string => {
