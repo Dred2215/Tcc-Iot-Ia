@@ -5,7 +5,7 @@ from typing import Any, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from tratamento_response_IA import processar_resposta, inicializar_dispositivos
+from src.tratamento_response_IA import processar_resposta, inicializar_dispositivos
 
 
 app = FastAPI()
