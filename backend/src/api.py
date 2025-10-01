@@ -9,15 +9,10 @@ from src.tratamento_response_IA import processar_resposta
 
 app = FastAPI()
 
-# 🔒 CORS fixo para homolog - apenas o frontend homolog pode acessar
-origins = [
-    "https://tcc-iot-frontend-homolog.dlivfa.easypanel.host",
-    "http://tcc-iot-frontend-homolog.dlivfa.easypanel.host"
-]
-
+# 🔓 CORS aberto - aceita qualquer origem enviada no header Origin
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"],  # aceita todos os domínios
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -28,7 +23,7 @@ class MensagemRequest(BaseModel):
     comando: Optional[Any] = ""
     tipo: Optional[str] = ""
 
-# ✅ Endpoint de notificação (já existente)
+# ✅ Endpoint de notificação
 @app.post("/notificar-mensagem-ia")
 async def notificar_mensagem_ia(req: MensagemRequest):
     print(f"[LOG] Corpo recebido: mensagem='{req.mensagem}', comando='{req.comando}', tipo='{req.tipo}'")
@@ -54,7 +49,7 @@ async def notificar_mensagem_ia(req: MensagemRequest):
 
     return {"status": "Notificação recebida", "data": IA.message}
 
-# ✅ Novo endpoint de teste de comunicação
+# ✅ Endpoint de teste de comunicação
 @app.get("/ping")
 async def ping():
     return {"message": "Backend está online e se comunicando com o frontend 🚀"}
