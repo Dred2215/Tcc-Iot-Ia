@@ -21,6 +21,19 @@ interface ChatMessageProps {
   message: Message;
 }
 
+const RAW_BACKEND_BASE_URL =
+  (typeof import.meta !== "undefined" && (import.meta as any)?.env?.VITE_BACKEND_BASE_URL) ||
+  "http://localhost:8000";
+
+const BACKEND_BASE_URL =
+  typeof RAW_BACKEND_BASE_URL === "string" && RAW_BACKEND_BASE_URL.length > 0
+    ? RAW_BACKEND_BASE_URL
+    : "http://localhost:8000";
+
+const sanitizeBaseUrl = (url: string) => (url.endsWith("/") ? url.slice(0, -1) : url);
+
+const NOTIFY_ENDPOINT = sanitizeBaseUrl(BACKEND_BASE_URL) + "/notificar-mensagem-ia";
+
 const formatWebhookResponse = (data: unknown): string => {
   if (!data) {
     return "Sem resposta do servidor.";
@@ -216,7 +229,7 @@ export const ChatInterface = () => {
           const comandoStr =
             typeof command === "string" ? command : JSON.stringify(command ?? "");
 
-          await fetch("http://localhost:8000/notificar-mensagem-ia", {
+          await fetch(NOTIFY_ENDPOINT, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",

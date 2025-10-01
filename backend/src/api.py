@@ -1,9 +1,11 @@
+import asyncio
+import json
+import os
+from typing import Any, Optional
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional, Any
-import asyncio
-import json
 from src.tratamento_response_IA import processar_resposta
 
 # # Importa a função do seu arquivo principal
@@ -11,15 +13,13 @@ from src.tratamento_response_IA import processar_resposta
 
 app = FastAPI()
 
-# Configuração de CORS com a porta correta do React
+# Configuração de CORS com suporte a múltiplas origens via env
+allowed_origins = os.getenv('ALLOWED_ORIGINS', "http://localhost:8080,http://127.0.0.1:8080,http://localhost:3000,http://127.0.0.1:3000,")
+origins = [origin.strip() for origin in allowed_origins.split(',') if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:8080",  # Porta do seu React (Vite)
-        "http://127.0.0.1:8080",
-        "http://localhost:3000",  # Mantém para testes
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

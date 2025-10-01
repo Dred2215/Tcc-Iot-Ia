@@ -2,6 +2,9 @@
 FROM node:18 AS build
 WORKDIR /app
 
+ARG VITE_BACKEND_BASE_URL=http://localhost:8000
+ENV VITE_BACKEND_BASE_URL=${VITE_BACKEND_BASE_URL}
+
 COPY package*.json ./
 RUN npm ci
 
