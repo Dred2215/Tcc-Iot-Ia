@@ -5,9 +5,16 @@ from typing import Any, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from src.tratamento_response_IA import processar_resposta
+from tratamento_response_IA import processar_resposta, inicializar_dispositivos
+
 
 app = FastAPI()
+
+@app.on_event("startup")
+async def startup_event():
+    print("🔄 Inicializando dispositivos...")
+    inicializar_dispositivos()
+
 
 # 🔓 CORS aberto - aceita qualquer origem enviada no header Origin
 app.add_middleware(

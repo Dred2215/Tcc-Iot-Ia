@@ -1,15 +1,24 @@
 import asyncio
-from src.dispositivos import Lampada, Portao
-from src.config_tuya import openapi, home_id
+from dispositivos import Lampada, Portao
+from config_tuya import openapi, home_id
 
-# Instâncias dos dispositivos
-DISPOSITIVOS = {
-    "lampada": Lampada("Luz", "eb20e4ad6247150831lufg", openapi)
-}
+# Containers vazios (serão preenchidos na inicialização)
+DISPOSITIVOS = {}
+CENAS = {}
 
-CENAS = {
-    "portao": Portao("Portão Garagem", openapi, home_id, "yp6IXiAOst5s66wX")
-}
+def inicializar_dispositivos():
+    global DISPOSITIVOS, CENAS
+    try:
+        DISPOSITIVOS = {
+            "lampada": Lampada("Luz", "eb20e4ad6247150831lufg", openapi)
+        }
+        CENAS = {
+            "portao": Portao("Portão Garagem", openapi, home_id, "yp6IXiAOst5s66wX")
+        }
+        print("✅ Dispositivos e cenas inicializados.")
+    except Exception as e:
+        print("❌ Erro ao inicializar dispositivos:", e)
+
 
 CORES_TUYA = {
     "vermelho":   {"h": 0,   "s": 1000, "v": 1000},
