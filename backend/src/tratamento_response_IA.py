@@ -1,6 +1,6 @@
 import asyncio
-from dispositivos import Lampada, Portao
-from config_tuya import openapi, home_id
+from src.dispositivos import Lampada, Portao
+from src.config_tuya import openapi, home_id
 
 # Instâncias dos dispositivos
 DISPOSITIVOS = {
