@@ -7,6 +7,7 @@ build
 
 # Ignora arquivos de log e de ambiente local
 .env
+!.env.production
 .env.*
 npm-debug.log*
 yarn-debug.log*
