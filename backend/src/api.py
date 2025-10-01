@@ -1,15 +1,16 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+import os # Não se esqueça de importar
 
-# ✅ Gerenciamento de ciclo de vida com lifespan
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("🔄 Servidor iniciando...")
+    # ADICIONE ESTA LINHA PARA DEPURAR
+    print(f"✅ VARIÁVEL DE AMBIENTE PORT: {os.getenv('PORT')}") 
     print("✅ Backend pronto para receber conexões!")
     yield
     print("🛑 Encerrando aplicação...")
-    print("🛑 Backend finalizado com sucesso.")
 
 app = FastAPI(lifespan=lifespan)
 
