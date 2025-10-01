@@ -1,6 +1,5 @@
 import asyncio
 import json
-import os
 from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException
@@ -8,14 +7,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from src.tratamento_response_IA import processar_resposta
 
-# # Importa a função do seu arquivo principal
-# from .tratamento_response_IA import teste_chamada_front
-
 app = FastAPI()
 
-# Configuração de CORS com suporte a múltiplas origens via env
-allowed_origins = os.getenv('ALLOWED_ORIGINS', "http://localhost:8080,http://127.0.0.1:8080,http://localhost:3000,http://127.0.0.1:3000,")
-origins = [origin.strip() for origin in allowed_origins.split(',') if origin.strip()]
+# 🔒 CORS fixo: só aceita chamadas do frontend homolog
+origins = [
+    "https://tcc-iot-frontend-homolog.dlivfa.easypanel.host"
+]
 
 app.add_middleware(
     CORSMiddleware,
@@ -34,14 +31,12 @@ class MensagemRequest(BaseModel):
 async def notificar_mensagem_ia(req: MensagemRequest):
     print(f"[LOG] Corpo recebido: mensagem='{req.mensagem}', comando='{req.comando}', tipo='{req.tipo}'")
 
-    # Estrutura para armazenar a mensagem e o comando
     class IA:
         message = {
             "message": req.mensagem,
             "command": req.comando
         }
 
-    # Decodifica o comando se ele for uma string JSON
     comando_obj = IA.message["command"]
     if isinstance(comando_obj, str) and comando_obj.strip().startswith(('[', '{')):
         try:
@@ -50,23 +45,13 @@ async def notificar_mensagem_ia(req: MensagemRequest):
             print(f"[ERRO] Falha ao decodificar o JSON do comando: {comando_obj}")
             raise HTTPException(status_code=400, detail="Comando em formato JSON inválido.")
 
-    # Chama a função para processar o comando da IA
     if req.tipo == "IOT" and comando_obj:
         print(f"[AÇÃO] Executando comando IOT: {comando_obj}")
-        # Usamos asyncio.create_task para não bloquear a resposta da API
         asyncio.create_task(processar_resposta(comando_obj))
         return {"status": "Comando IOT recebido e sendo processado em segundo plano."}
 
     return {"status": "Notificação recebida", "data": IA.message}
 
-    
-    
 @app.middleware("http")
 async def log_requests(request, call_next):
     print(f"[LOG] {request.method} {request.url}")
-    response = await call_next(request)
-    return response
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -21,69 +21,44 @@ interface ChatMessageProps {
   message: Message;
 }
 
-const RAW_NOTIFY_ENDPOINT =
-  (typeof import.meta !== "undefined" && (import.meta as any)?.env?.VITE_NOTIFY_ENDPOINT) ||
-  "";
-
-const RAW_BACKEND_BASE_URL =
-  (typeof import.meta !== "undefined" && (import.meta as any)?.env?.VITE_BACKEND_BASE_URL) ||
-  "http://localhost:8000";
-
-const BACKEND_BASE_URL =
-  typeof RAW_BACKEND_BASE_URL === "string" && RAW_BACKEND_BASE_URL.length > 0
-    ? RAW_BACKEND_BASE_URL
-    : "http://localhost:8000";
-
-const sanitizeBaseUrl = (url: string) => (url.endsWith("/") ? url.slice(0, -1) : url);
-
+// 🔒 Endpoint fixo (sem localhost, sem env)
 const NOTIFY_ENDPOINT =
-  typeof RAW_NOTIFY_ENDPOINT === "string" && RAW_NOTIFY_ENDPOINT.trim().length > 0
-    ? sanitizeBaseUrl(RAW_NOTIFY_ENDPOINT.trim())
-    : sanitizeBaseUrl(BACKEND_BASE_URL) + "/notificar-mensagem-ia";
+  "https://tcc-iot-backend-homolog.dlivfa.easypanel.host/notificar-mensagem-ia";
 
 const formatWebhookResponse = (data: unknown): string => {
   if (!data) {
     return "Sem resposta do servidor.";
   }
 
-  // Novo formato: { type: "IOT", content_message: "...", friendly_message: "..." }
   if (typeof data === "object" && data !== null) {
     const obj = data as { type?: string; content_message?: string; friendly_message?: string };
 
     if (obj.type === "IOT" && obj.friendly_message) {
-      return obj.friendly_message; // Exibe a mensagem amigável
+      return obj.friendly_message;
     }
 
     if (obj.type === "general" && obj.content_message) {
-      return obj.content_message; // Exibe mensagem geral
+      return obj.content_message;
     }
   }
 
-  // Caso seja array vindo do backend (formato antigo)
   if (Array.isArray(data) && data.length > 0) {
     const obj = data[0] as any;
-
-    // IoT Commands (formato antigo)
     if (obj.IOT_command && Array.isArray(obj.IOT_command)) {
       const comandos = obj.IOT_command
         .map((cmd: any, i: number) => {
           return `Comando ${i + 1}:\n- Dispositivo: ${cmd.device ?? "?"}\n- Ação: ${cmd.action ?? "?"}\n- Parâmetro: ${cmd.parameter ?? "nenhum"}\n- Tempo: ${cmd.additional_condit ?? "0"} seg`;
         })
         .join("\n\n");
-
       return `Para sua mensagem "IOT":\n${comandos}`;
     }
-
-    // Mensagem geral (formato antigo)
     if (obj.type_message === "general") {
       return `Para sua mensagem "general" - ${obj.message ?? ""}`;
     }
   }
 
-  // Caso seja objeto no formato { type, content } (formato antigo)
   if (typeof data === "object") {
     const maybeObj = data as { type?: string; content?: unknown };
-
     if (maybeObj.type && maybeObj.content) {
       if (maybeObj.type === "IOT" && Array.isArray(maybeObj.content)) {
         const comandos = maybeObj.content
@@ -91,17 +66,14 @@ const formatWebhookResponse = (data: unknown): string => {
             return `Comando ${i + 1}:\n- Dispositivo: ${cmd.device ?? "?"}\n- Ação: ${cmd.action ?? "?"}\n- Parâmetro: ${cmd.parameter ?? "nenhum"}\n- Tempo: ${cmd.additional_condit ?? "0"} seg`;
           })
           .join("\n\n");
-
         return `Para sua mensagem "IOT":\n${comandos}`;
       }
-
       if (maybeObj.type === "general" && typeof maybeObj.content === "string") {
         return `Para sua mensagem "general" - ${maybeObj.content}`;
       }
     }
   }
 
-  // Fallback: mostra JSON bruto
   try {
     return JSON.stringify(data, null, 2);
   } catch {
@@ -111,7 +83,6 @@ const formatWebhookResponse = (data: unknown): string => {
 
 const ChatMessage = ({ message }: ChatMessageProps) => {
   const isUser = message.type === "user";
-  
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"} mb-4`}>
       <div
@@ -122,13 +93,9 @@ const ChatMessage = ({ message }: ChatMessageProps) => {
         }`}
       >
         <div className="flex items-start space-x-2">
-          {!isUser && (
-            <div className="w-2 h-2 bg-tech-blue rounded-full mt-2 animate-pulse" />
-          )}
+          {!isUser && <div className="w-2 h-2 bg-tech-blue rounded-full mt-2 animate-pulse" />}
           <div>
-            <p className="text-sm leading-relaxed whitespace-pre-wrap">
-              {message.text}
-            </p>
+            <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.text}</p>
             <span
               className={`text-xs mt-1 block ${
                 isUser ? "text-primary-foreground/70" : "text-muted-foreground"
@@ -164,9 +131,7 @@ export const ChatInterface = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  // Efeito para rolar para a última mensagem
   useEffect(() => {
-    // Um pequeno timeout garante que o DOM foi atualizado antes de rolar
     setTimeout(scrollToBottom, 100);
   }, [messages, isLoading]);
 
@@ -191,8 +156,6 @@ export const ChatInterface = () => {
 
       try {
         const webhookResponse = await sendUserMessage(trimmedText);
-
-        // Verifica se é o novo formato: { type: "IOT", content_message: {...}, friendly_message: "..." }
         let aiMessageText = formatWebhookResponse(webhookResponse);
         let command = null;
 
@@ -208,52 +171,42 @@ export const ChatInterface = () => {
             content_message: any;
             friendly_message: string;
           };
-
-          // Exibe o friendly_message no front
           aiMessageText = responseObj.friendly_message;
-
-          // Armazena content_message como command para log no console
           command = responseObj.content_message;
         }
 
         const aiMessage: Message = {
           id: (Date.now() + 1).toString(),
-          text: aiMessageText, // friendly_message exibido no front
+          text: aiMessageText,
           type: "ai",
           timestamp: new Date(),
         };
-
         setMessages((prev) => [...prev, aiMessage]);
 
-        // Imprime o command no console (content_message renomeado para command)
         if (command) {
           console.log("[LOG] Command recebido:", command);
         }
 
-        // Envia o comando para o backend
         try {
           const tipo = (webhookResponse as any)?.type ?? (command ? "IOT" : "general");
           const comandoStr =
             typeof command === "string" ? command : JSON.stringify(command ?? "");
-
           await fetch(NOTIFY_ENDPOINT, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              mensagem: aiMessage.text,   // texto amigável que você exibiu no chat
-              comando: comandoStr,        // comando (string ou objeto serializado)
-              tipo,                       // "IOT" ou "general"
+              mensagem: aiMessage.text,
+              comando: comandoStr,
+              tipo,
             }),
           });
         } catch (notificacaoError) {
           console.error("Erro ao notificar backend:", notificacaoError);
-          setError("Não foi possível notificar o backend. Tente novamente."); // mantém aviso em vermelho
+          setError("Não foi possível notificar o backend. Tente novamente.");
         }
-
-
-      } catch (serviceError) {
+      } catch {
         console.error("Failed to reach the automation service. Please try again.");
       } finally {
         setIsLoading(false);
@@ -278,12 +231,11 @@ export const ChatInterface = () => {
         </div>
       </div>
 
-      {/* Messages Container */}
+      {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-1">
         {messages.map((message) => (
           <ChatMessage key={message.id} message={message} />
         ))}
-
         {isLoading && (
           <div className="flex justify-start mb-4">
             <div className="bg-gradient-card text-foreground border border-border/50 max-w-xs md:max-w-md px-4 py-3 rounded-2xl shadow-card mr-4">
@@ -298,19 +250,16 @@ export const ChatInterface = () => {
             </div>
           </div>
         )}
-
-        {/* Elemento invisível para marcar o fim do chat e ajudar no scroll */}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Form */}
+      {/* Input */}
       <form onSubmit={handleSendMessage} className="p-4 border-t border-border/50">
         {error && (
           <div className="mb-2 text-sm text-destructive bg-destructive/10 px-3 py-1 rounded">
             {error}
           </div>
         )}
-
         <div className="flex space-x-2">
           <input
             type="text"
@@ -329,7 +278,6 @@ export const ChatInterface = () => {
             Send
           </button>
         </div>
-
         <div className="flex justify-between items-center mt-2 text-xs text-muted-foreground">
           <span>Press Enter to send</span>
           <span>{inputValue.length}/500</span>
