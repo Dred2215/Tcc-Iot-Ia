@@ -5,7 +5,7 @@ from typing import Any, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from src.tratamento_response_IA import processar_resposta, inicializar_dispositivos
+from src.tratamento_response_IA import inicializar_dispositivos, processar_resposta
 
 
 app = FastAPI()
@@ -14,6 +14,11 @@ app = FastAPI()
 async def startup_event():
     print("🔄 Inicializando dispositivos...")
     inicializar_dispositivos()
+    print("✅ Dispositivos e cenas inicializados.")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    print("🛑 Encerrando aplicação...")
 
 
 # 🔓 CORS aberto - aceita qualquer origem enviada no header Origin

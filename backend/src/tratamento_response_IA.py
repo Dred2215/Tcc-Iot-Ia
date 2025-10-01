@@ -8,16 +8,19 @@ CENAS = {}
 
 def inicializar_dispositivos():
     global DISPOSITIVOS, CENAS
-    try:
-        DISPOSITIVOS = {
-            "lampada": Lampada("Luz", "eb20e4ad6247150831lufg", openapi)
-        }
-        CENAS = {
-            "portao": Portao("Portão Garagem", openapi, home_id, "yp6IXiAOst5s66wX")
-        }
-        print("✅ Dispositivos e cenas inicializados.")
-    except Exception as e:
-        print("❌ Erro ao inicializar dispositivos:", e)
+    print("🔄 Inicializando dispositivos...")
+
+    DISPOSITIVOS = {
+        "lampada": Lampada("Luz", "eb20e4ad6247150831lufg", openapi)
+    }
+
+    CENAS = {
+        "portao": Portao("Portão Garagem", openapi, home_id, "yp6IXiAOst5s66wX")
+    }
+
+    print("✅ Dispositivo 'Luz' inicializado.")
+    print("✅ Dispositivo de cena 'Portão Garagem' inicializado.")
+    print("✅ Dispositivos e cenas inicializados.")
 
 
 CORES_TUYA = {
