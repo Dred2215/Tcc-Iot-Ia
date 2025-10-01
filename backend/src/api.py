@@ -11,7 +11,8 @@ app = FastAPI()
 
 # 🔒 CORS fixo para homolog - apenas o frontend homolog pode acessar
 origins = [
-    "https://tcc-iot-frontend-homolog.dlivfa.easypanel.host, http://tcc-iot-frontend-homolog.dlivfa.easypanel.host, https://tcc-iot-backend-homolog.dlivfa.easypanel.host/notificar-mensagem-ia, http://tcc-iot-backend-homolog.dlivfa.easypanel.host/notificar-mensagem-ia"
+    "https://tcc-iot-frontend-homolog.dlivfa.easypanel.host",
+    "http://tcc-iot-frontend-homolog.dlivfa.easypanel.host"
 ]
 
 app.add_middleware(
@@ -27,6 +28,7 @@ class MensagemRequest(BaseModel):
     comando: Optional[Any] = ""
     tipo: Optional[str] = ""
 
+# ✅ Endpoint de notificação (já existente)
 @app.post("/notificar-mensagem-ia")
 async def notificar_mensagem_ia(req: MensagemRequest):
     print(f"[LOG] Corpo recebido: mensagem='{req.mensagem}', comando='{req.comando}', tipo='{req.tipo}'")
@@ -52,6 +54,12 @@ async def notificar_mensagem_ia(req: MensagemRequest):
 
     return {"status": "Notificação recebida", "data": IA.message}
 
+# ✅ Novo endpoint de teste de comunicação
+@app.get("/ping")
+async def ping():
+    return {"message": "Backend está online e se comunicando com o frontend 🚀"}
+
+# Middleware de log
 @app.middleware("http")
 async def log_requests(request, call_next):
     print(f"[LOG] {request.method} {request.url}")
