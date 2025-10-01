@@ -11,7 +11,7 @@ app = FastAPI()
 
 # 🔒 CORS fixo: só aceita chamadas do frontend homolog
 origins = [
-    "https://tcc-iot-frontend-homolog.dlivfa.easypanel.host"
+    "https://tcc-iot-frontend-homolog.dlivfa.easypanel.host, https://tcc-iot-backend-homolog.dlivfa.easypanel.host/notificar-mensagem-ia"
 ]
 
 app.add_middleware(
