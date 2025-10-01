@@ -21,6 +21,10 @@ interface ChatMessageProps {
   message: Message;
 }
 
+const RAW_NOTIFY_ENDPOINT =
+  (typeof import.meta !== "undefined" && (import.meta as any)?.env?.VITE_NOTIFY_ENDPOINT) ||
+  "";
+
 const RAW_BACKEND_BASE_URL =
   (typeof import.meta !== "undefined" && (import.meta as any)?.env?.VITE_BACKEND_BASE_URL) ||
   "http://localhost:8000";
@@ -32,7 +36,10 @@ const BACKEND_BASE_URL =
 
 const sanitizeBaseUrl = (url: string) => (url.endsWith("/") ? url.slice(0, -1) : url);
 
-const NOTIFY_ENDPOINT = sanitizeBaseUrl(BACKEND_BASE_URL) + "/notificar-mensagem-ia";
+const NOTIFY_ENDPOINT =
+  typeof RAW_NOTIFY_ENDPOINT === "string" && RAW_NOTIFY_ENDPOINT.trim().length > 0
+    ? sanitizeBaseUrl(RAW_NOTIFY_ENDPOINT.trim())
+    : sanitizeBaseUrl(BACKEND_BASE_URL) + "/notificar-mensagem-ia";
 
 const formatWebhookResponse = (data: unknown): string => {
   if (!data) {
