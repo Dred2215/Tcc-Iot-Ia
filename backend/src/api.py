@@ -8,18 +8,30 @@ from pydantic import BaseModel
 from contextlib import asynccontextmanager
 
 # 👉 Import ajustado (usa src.)
-from tratamento_response_IA import processar_resposta
+from tratamento_response_IA import processar_resposta, inicializar_dispositivos, DISPOSITIVOS
 
 # ✅ Ciclo de vida com logs
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("🔄 Servidor iniciando...")
     print(f"✅ VARIÁVEL DE AMBIENTE PORT: {os.getenv('PORT')}")
+
+    # 🚀 Inicializa os dispositivos/cenas aqui
+    try:
+        inicializar_dispositivos()
+        print("[INIT] Dispositivos e cenas prontos:", list(DISPOSITIVOS.keys()))
+    except Exception as e:
+        print(f"[ERRO] Falha ao inicializar dispositivos/cenas: {e}")
+
     print("✅ Backend pronto para receber conexões!")
     yield
     print("🛑 Encerrando aplicação...")
 
+
 app = FastAPI(lifespan=lifespan)
+
+
+
 
 # 🔓 CORS aberto para localhost (ambiente de dev)
 origins = [
