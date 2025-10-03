@@ -51,16 +51,21 @@ const Voice = () => {
       const formData = new FormData();
       formData.append('audio', audioBlob, 'recording.webm');
 
-      const response = await fetch('/api/record', {
+      const baseUrl = (import.meta.env.VITE_BACKEND_BASE_URL as string | undefined) ?? "";
+      const endpoint = baseUrl ? `${baseUrl.replace(/\/$/, "")}/record` : "/record";
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         body: formData,
       });
 
       if (!response.ok) {
-        throw new Error('Failed to send audio');
+        const errorText = await response.text().catch(() => 'Failed to send audio');
+        throw new Error(errorText || 'Failed to send audio');
       }
 
-      console.log('Audio sent successfully');
+      const result = await response.json().catch(() => null);
+      console.log('Audio sent successfully', result);
     } catch (error) {
       console.error('Error sending audio:', error);
     } finally {

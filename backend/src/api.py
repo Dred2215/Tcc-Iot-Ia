@@ -1,8 +1,11 @@
 import asyncio
 import json
 import os
+from datetime import datetime, timezone
+from pathlib import Path
+from uuid import uuid4
 from typing import Any, Optional
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
@@ -10,7 +13,6 @@ from contextlib import asynccontextmanager
 # 👉 Import ajustado (usa src.)
 from tratamento_response_IA import processar_resposta, inicializar_dispositivos, DISPOSITIVOS
 
-# ✅ Ciclo de vida com logs
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("🔄 Servidor iniciando...")
@@ -27,18 +29,14 @@ async def lifespan(app: FastAPI):
     yield
     print("🛑 Encerrando aplicação...")
 
-
 app = FastAPI(lifespan=lifespan)
 
-
-
-
-# 🔓 CORS aberto para localhost (ambiente de dev)
+# 🔒 CORS fixo: apenas o frontend homolog pode acessar
 origins = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://localhost:8080",
-    "http://127.0.0.1:8080",
+    "https://tcc-iot-frontend-homolog.dlivfa.easypanel.host",
+    "http://tcc-iot-frontend-homolog.dlivfa.easypanel.host",
+    "http://localhost:8000/record",
+    "http://localhost:8080"
 ]
 
 app.add_middleware(
@@ -48,7 +46,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 # ✅ Modelo da request
 class MensagemRequest(BaseModel):
@@ -90,6 +87,42 @@ async def notificar_mensagem_ia(req: MensagemRequest):
 @app.get("/ping")
 async def ping():
     return {"message": "Backend está online 🚀"}
+
+@app.post("/record")
+async def record(audio: UploadFile = File(...)):
+    if not audio.filename:
+        raise HTTPException(status_code=400, detail="Nenhum arquivo de audio enviado.")
+
+    content_type = (audio.content_type or "").lower()
+    if not content_type.startswith("audio/"):
+        raise HTTPException(status_code=400, detail="Tipo de arquivo invalido. Envie um audio.")
+
+    base_path = Path(__file__).resolve().parent.parent
+    audio_dir = base_path / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+
+    original_suffix = Path(audio.filename).suffix
+    extension = original_suffix if original_suffix else ".webm"
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+    unique_id = uuid4().hex
+    filename = f"recording_{timestamp}_{unique_id}{extension}"
+    file_path = audio_dir / filename
+
+    data = await audio.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Arquivo de audio vazio.")
+
+    with file_path.open("wb") as buffer:
+        buffer.write(data)
+
+    print(f"[AUDIO] Arquivo salvo em {file_path}")
+
+    return {
+        "status": "ok",
+        "filename": filename,
+        "relative_path": f"audio/{filename}",
+    }
+
 
 # Middleware de log
 @app.middleware("http")
