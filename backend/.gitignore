@@ -23,6 +23,10 @@ dist-ssr
 *.sln
 *.sw?
 
+.env
+
 .env.development
 
 .env.production
+
+automa-code-348d4b5cc3bd.json

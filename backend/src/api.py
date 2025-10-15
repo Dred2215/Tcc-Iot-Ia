@@ -36,7 +36,9 @@ origins = [
     "https://tcc-iot-frontend-homolog.dlivfa.easypanel.host",
     "http://tcc-iot-frontend-homolog.dlivfa.easypanel.host",
     "http://localhost:8000/record",
-    "http://localhost:8080"
+    "http://localhost:8080",
+    "http://localhost:8080/text",
+    "http://localhost:8080/notificar-mensagem-ia"
 ]
 
 app.add_middleware(
@@ -83,6 +85,32 @@ async def notificar_mensagem_ia(req: MensagemRequest):
 
     return {"status": "Notificação recebida", "data": IA.message}
 
+
+# ✅ Endpoint para comandos de voz (texto final do WebSocket)
+class VoiceCommand(BaseModel):
+    message: str
+
+@app.post("/voice_command")
+async def voice_command(req: VoiceCommand):
+    """
+    Recebe o texto final reconhecido pela voz e envia para o sistema de tratamento.
+    """
+    try:
+        print(f"[🎙️ VOICE] Comando recebido: {req.message}")
+
+        # 🔹 Envia o texto para o mesmo fluxo usado no chat textual
+        resposta = await processar_resposta(req.message)
+
+        print(f"[🎯 VOICE] Resposta gerada: {resposta}")
+        return {"status": "ok", "response": resposta}
+
+    except Exception as e:
+        print(f"[ERRO VOICE] {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
 # ✅ Endpoint de teste
 @app.get("/ping")
 async def ping():
@@ -122,6 +150,8 @@ async def record(audio: UploadFile = File(...)):
         "filename": filename,
         "relative_path": f"audio/{filename}",
     }
+
+
 
 
 # Middleware de log

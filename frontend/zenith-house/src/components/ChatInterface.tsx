@@ -22,7 +22,7 @@ interface ChatMessageProps {
 }
 
 // 🔒 Endpoint fixo em localhost:8080 (ambiente de dev)
-const NOTIFY_ENDPOINT_DEV = "http://localhost:8080/notificar-mensagem-ia";
+const NOTIFY_ENDPOINT_DEV = "http://localhost:8000/notificar-mensagem-ia";
 
 
 const formatWebhookResponse = (data: unknown): string => {

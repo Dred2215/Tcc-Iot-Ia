@@ -1,37 +1,23 @@
 import subprocess
 from pathlib import Path
+import shutil
+import re
+import unicodedata
+import time
 from google.cloud import speech
 from google.oauth2 import service_account
 
 # 🔹 Escopos mínimos para usar a API Speech
 SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
 
-# Caminho da pasta secret
-SECRET_DIR = Path(__file__).resolve().parent.parent / "secret"
-# Caminho da pasta de áudios
-AUDIO_DIR = Path(__file__).resolve().parent.parent / "audio"
+# Caminhos das pastas
+BASE_DIR = Path(__file__).resolve().parent.parent
+SECRET_DIR = BASE_DIR / "secret"
+AUDIO_DIR = BASE_DIR / "audio"
+CHECKED_AUDIO_DIR = BASE_DIR / "checked_audio"
 
-
-# ----------------------------
-# Conversão para MP3 com ffmpeg
-# ----------------------------
-def convert_audio_to_mp3():
-    if not AUDIO_DIR.exists():
-        print("❌ Pasta 'audio' não encontrada.")
-        return
-
-    for file in AUDIO_DIR.glob("*.webm"):
-        mp3_file = file.with_suffix(".mp3")
-        try:
-            subprocess.run(
-                ["ffmpeg", "-y", "-i", str(file), str(mp3_file)],
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
-            )
-            print(f"✅ Convertido: {file.name} → {mp3_file.name}")
-        except subprocess.CalledProcessError as e:
-            print(f"❌ Erro ao converter {file.name}: {e.stderr.decode()}")
+# Garante que a pasta de destino exista
+CHECKED_AUDIO_DIR.mkdir(exist_ok=True)
 
 
 # ----------------------------
@@ -54,53 +40,108 @@ def load_credentials():
 
 
 # ----------------------------
+# Função auxiliar: cria nome de arquivo baseado na transcrição
+# ----------------------------
+def gerar_nome_audio(transcricao: str) -> str:
+    # Remove acentos e caracteres especiais
+    texto_limpo = unicodedata.normalize("NFKD", transcricao).encode("ASCII", "ignore").decode()
+    # Mantém apenas letras, números e espaços
+    texto_limpo = re.sub(r"[^a-zA-Z0-9\s]", "", texto_limpo)
+    # Pega os 10 primeiros caracteres e substitui espaços por "_"
+    prefixo = "_".join(texto_limpo.strip().split())[:10]
+    return f"{prefixo}_check.mp3"
+
+
+# ----------------------------
 # Transcrição de áudio
 # ----------------------------
 def transcrever_audio():
+    tempo_inicio_total = time.time()  # 🕒 Início do processo total
+
+    if not AUDIO_DIR.exists():
+        print("❌ Pasta 'audio' não encontrada.")
+        return
+
+    converted_files = []
+
+    # 1️⃣ Converte todos os .webm para .mp3 antes de transcrever
+    print("\n🎧 Iniciando conversão de arquivos .webm → .mp3...")
+    tempo_inicio_conversao = time.time()
+
+    webm_files = list(AUDIO_DIR.glob("*.webm"))
+    for file in webm_files:
+        mp3_file = file.with_suffix(".mp3")
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", str(file), str(mp3_file)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            print(f"✅ Convertido: {file.name} → {mp3_file.name}")
+            converted_files.append((file, mp3_file))
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Erro ao converter {file.name}: {e.stderr.decode()}")
+
+    tempo_fim_conversao = time.time()
+    print(f"⏱️ Conversão concluída em {tempo_fim_conversao - tempo_inicio_conversao:.2f} segundos.\n")
+
+    # 2️⃣ Carrega credenciais e inicializa cliente
     creds = load_credentials()
     client = speech.SpeechClient(credentials=creds)
 
-    # 📂 Pega o primeiro arquivo MP3 na pasta audio
-    arquivos = list(AUDIO_DIR.glob("*.mp3"))
-    if not arquivos:
-        print("⚠️ Nenhum arquivo .mp3 encontrado em /audio")
-        return
+    # 3️⃣ Transcreve cada arquivo convertido
+    for original_file, mp3_file in converted_files:
+        tempo_inicio_transcricao = time.time()
+        print(f"[INFO] Transcrevendo: {mp3_file.name}")
 
-    arquivo_audio = arquivos[0]
-    print(f"[INFO] Transcrevendo: {arquivo_audio.name}")
+        with open(mp3_file, "rb") as f:
+            audio_content = f.read()
 
-    with open(arquivo_audio, "rb") as f:
-        audio_content = f.read()
+        audio_google = speech.RecognitionAudio(content=audio_content)
+        config = speech.RecognitionConfig(
+            encoding=speech.RecognitionConfig.AudioEncoding.MP3,
+            sample_rate_hertz=44100,
+            language_code="pt-BR",
+            model="default"
+        )
 
-    # Prepara configuração
-    audio_google = speech.RecognitionAudio(content=audio_content)
-    config = speech.RecognitionConfig(
-        encoding=speech.RecognitionConfig.AudioEncoding.MP3,
-        sample_rate_hertz=44100,   # padrão de conversão
-        language_code="pt-BR",
-        model="default"
-    )
+        try:
+            response = client.recognize(config=config, audio=audio_google)
 
-    try:
-        response = client.recognize(config=config, audio=audio_google)
+            if not response.results:
+                print("⚠️ Nenhuma transcrição encontrada.")
+                continue
 
-        if not response.results:
-            print("⚠️ Nenhuma transcrição encontrada.")
-            return
+            texto_transcrito = " ".join(
+                [result.alternatives[0].transcript for result in response.results]
+            )
+            print(f"[TRANSCRIÇÃO] {texto_transcrito}")
 
-        for result in response.results:
-            print(f"[TRANSCRIÇÃO] {result.alternatives[0].transcript}")
+            # 4️⃣ Gera novo nome do arquivo de áudio
+            novo_nome = gerar_nome_audio(texto_transcrito)
+            destino = CHECKED_AUDIO_DIR / novo_nome
 
-    except Exception as e:
-        print(f"❌ Erro na transcrição: {e}")
+            # 5️⃣ Move e renomeia o áudio convertido para /checked_audio
+            shutil.move(mp3_file, destino)
+            print(f"📦 Áudio movido e renomeado para: {destino.name}")
+
+            # 6️⃣ Remove o arquivo original .webm
+            original_file.unlink(missing_ok=True)
+            print(f"🗑️ Removido original: {original_file.name}")
+
+        except Exception as e:
+            print(f"❌ Erro na transcrição de {mp3_file.name}: {e}")
+
+        tempo_fim_transcricao = time.time()
+        print(f"⏱️ Tempo da transcrição: {tempo_fim_transcricao - tempo_inicio_transcricao:.2f} segundos\n")
+
+    tempo_total = time.time() - tempo_inicio_total
+    print(f"✅ Processo completo finalizado em {tempo_total:.2f} segundos 🚀")
 
 
 # ----------------------------
 # Execução principal
 # ----------------------------
 if __name__ == "__main__":
-    # 1. Converte todos os .webm encontrados para .mp3
-    convert_audio_to_mp3()
-
-    # 2. Transcreve o primeiro .mp3 disponível
     transcrever_audio()
