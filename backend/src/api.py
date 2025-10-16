@@ -1,17 +1,25 @@
 import asyncio
 import json
 import os
+import httpx
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 from typing import Any, Optional
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 
+
+
 # 👉 Import ajustado (usa src.)
 from tratamento_response_IA import processar_resposta, inicializar_dispositivos, DISPOSITIVOS
+
+
+N8N_LOGIN_URL = "https://nery-automa-n8n.dlivfa.easypanel.host/webhook/login_user_webhook"
+N8N_AUTH_CHECK_URL = "https://nery-automa-n8n.dlivfa.easypanel.host/webhook/auth_check_user"
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -38,7 +46,8 @@ origins = [
     "http://localhost:8000/record",
     "http://localhost:8080",
     "http://localhost:8080/text",
-    "http://localhost:8080/notificar-mensagem-ia"
+    "http://localhost:8080/notificar-mensagem-ia",
+    "http://localhost:8000/login_user"
 ]
 
 app.add_middleware(
@@ -109,12 +118,79 @@ async def voice_command(req: VoiceCommand):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-
-
 # ✅ Endpoint de teste
 @app.get("/ping")
 async def ping():
     return {"message": "Backend está online 🚀"}
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+@app.post("/login_user")
+async def login_user(request: Request, response: Response, data: LoginRequest):
+    """
+    Endpoint seguro de login.
+    Chama o webhook n8n de login e grava o session_id como cookie HttpOnly.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            n8n_response = await client.post(
+                N8N_LOGIN_URL,
+                json={"email": data.email, "password": data.password}
+            )
+
+        if n8n_response.status_code != 200:
+            raise HTTPException(status_code=401, detail=f"Erro N8N: {n8n_response.status_code}")
+
+        result = n8n_response.json()
+        print("[N8N LOGIN RESULT]", result)
+
+        session_id = result.get("session_id")
+        if not session_id:
+            raise HTTPException(status_code=401, detail="Login sem session_id retornado")
+
+        # Define cookie HttpOnly (TTL já gerenciado pelo n8n/Redis)
+        response.set_cookie(
+            key="session_id",
+            value=session_id,
+            httponly=True,
+            secure=False,  # alterar para True em produção
+            samesite="lax",
+            max_age=3600
+        )
+
+        return {"status": "success", "user": result.get("user")}
+
+    except Exception as e:
+        print(f"[ERRO LOGIN_USER] {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/auth_check_user")
+async def auth_check_user(request: Request):
+    """
+    Valida o cookie de sessão com o webhook n8n.
+    """
+    try:
+        session_id = request.cookies.get("session_id")
+        if not session_id:
+            raise HTTPException(status_code=401, detail="Cookie de sessão ausente")
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            n8n_response = await client.get(f"{N8N_AUTH_CHECK_URL}?session_id={session_id}")
+
+        if n8n_response.status_code != 200:
+            raise HTTPException(status_code=401, detail="Sessão inválida ou expirada")
+
+        data = n8n_response.json()
+        return {"status": "valid", "data": data}
+
+    except Exception as e:
+        print(f"[ERRO AUTH_CHECK] {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 
 @app.post("/record")
 async def record(audio: UploadFile = File(...)):

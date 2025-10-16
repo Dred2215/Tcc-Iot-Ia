@@ -8,26 +8,27 @@ export interface LoginResponse {
   };
 }
 
-const LOGIN_WEBHOOK_URL =
-  "https://nery-automa-n8n.dlivfa.easypanel.host/webhook/login_user_webhook";
+
+
+const LOGIN_WEBHOOK_URL = import.meta.env.VITE_LOGIN_WEBHOOK_URL;
+
 
 export async function loginUser(email: string, password: string): Promise<LoginResponse> {
   try {
-    const url = new URL(LOGIN_WEBHOOK_URL);
-    url.searchParams.append("email", email);
-    url.searchParams.append("password", password);
-
-    const response = await fetch(url.toString(), {
-      method: "GET",
+    const response = await fetch("http://localhost:8000/login_user", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include", // ⚠️ envia e recebe cookies automaticamente
+      body: JSON.stringify({ email, password }),
     });
 
     if (!response.ok) {
-      return { status: "error", message: `HTTP ${response.status}` };
+      const errText = await response.text();
+      return { status: "error", message: errText || `HTTP ${response.status}` };
     }
 
     const data = (await response.json()) as LoginResponse;
     console.log("[Login Response]", data);
-
     return data;
   } catch (err: any) {
     return { status: "error", message: err.message || "Network error" };

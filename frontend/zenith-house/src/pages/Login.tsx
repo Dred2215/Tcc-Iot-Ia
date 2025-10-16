@@ -27,12 +27,13 @@ const Login = () => {
 
     const result = await loginUser(formData.email, formData.password);
 
-    if (result.status === "success" && result.session_id) {
-      localStorage.setItem("session_id", result.session_id);
-      navigate("/"); // envia para a Home
-    } else {
-      setError(result.message || "Login failed");
+    if (result.status === "success") {
+      console.log("[LOGIN OK] Redirecionando para Home...");
+      navigate("/");
+      setTimeout(() => window.location.reload(), 150);
     }
+
+
 
     setIsLoading(false);
   };

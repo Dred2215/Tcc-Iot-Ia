@@ -13,14 +13,33 @@ const Home = () => {
       const result = await checkAuth();
 
       if (result.status === "error") {
+        console.warn("[Home Auth ❌] Sessão inválida, redirecionando...");
         navigate("/login");
       } else {
-        console.log("[Home Auth OK]", result);
+        // 🔍 Captura o usuário corretamente, mesmo se vier dentro de data.data
+        const userData =
+          result.user ||
+          result.data?.user ||
+          result.data?.data?.user ||
+          null;
+
+        if (userData) {
+          console.log(
+            `%c[Home Auth ✅] Usuário autenticado: ${userData.email}`,
+            "color: #00ff99; font-weight: bold;"
+          );
+        } else {
+          console.log(
+            "%c[Home Auth ⚠️] Sessão válida, mas sem dados de usuário retornados.",
+            "color: #ffaa00; font-weight: bold;"
+          );
+        }
       }
 
       setLoading(false);
     })();
   }, [navigate]);
+
 
   if (loading) {
     return (

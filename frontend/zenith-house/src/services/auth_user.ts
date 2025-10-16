@@ -1,42 +1,41 @@
 export interface AuthCheckResponse {
-  status: "success" | "error" | string;
+  status: "success" | "error" | "valid" | string;
   message?: string;
   user?: {
     id: string;
     email: string;
   };
+  data?: any; // para capturar retorno do backend
 }
 
-const AUTH_CHECK_URL =
-  "https://nery-automa-n8n.dlivfa.easypanel.host/webhook/auth_check_user";
+// Novo endpoint local do backend FastAPI
+const AUTH_CHECK_URL = "http://localhost:8000/auth_check_user";
 
 export async function checkAuth(): Promise<AuthCheckResponse> {
-  const sessionId = localStorage.getItem("session_id");
-
-  if (!sessionId) {
-    return { status: "error", message: "No session_id found in localStorage" };
-  }
-
   try {
-    const url = new URL(AUTH_CHECK_URL);
-    url.searchParams.append("session_id", sessionId);
-
-    const response = await fetch(url.toString(), {
+    // ⚠️ Agora não pegamos nada do localStorage.
+    // O cookie HttpOnly é enviado automaticamente.
+    const response = await fetch(AUTH_CHECK_URL, {
       method: "GET",
+      credentials: "include", // 🔒 envia o cookie session_id
     });
 
     if (!response.ok) {
+      console.warn("[AuthCheck] HTTP error:", response.status);
       return { status: "error", message: `HTTP ${response.status}` };
     }
 
     const data = (await response.json()) as AuthCheckResponse;
+    console.log("[AuthCheck]", data);
 
-    // 👇 debug
-    console.log("[Auth Check Response]", data);
+    // Caso o backend use "valid" como status:
+    if (data.status === "valid" || data.status === "success") {
+      return { status: "success", user: data.user, data };
+    }
 
-    return data;
+    return { status: "error", message: "Session invalid or expired" };
   } catch (err: any) {
-    console.error("[Auth Check Error]", err);
+    console.error("[AuthCheck Error]", err);
     return { status: "error", message: err.message || "Network error" };
   }
 }
