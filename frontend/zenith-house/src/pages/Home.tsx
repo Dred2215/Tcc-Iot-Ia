@@ -92,7 +92,7 @@ const Home = () => {
             title="Voice Control"
             description="Speak naturally to your smart home"
             icon={<Mic size={48} />}
-            route="/webvoice_test"
+            route="/webvoice"
           />
 
           <ButtonCard

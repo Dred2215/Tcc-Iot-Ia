@@ -1,269 +1,142 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Mic, Square } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
-const WebVoice_test = () => {
+const Voice_STT_Test = () => {
   const navigate = useNavigate();
 
-  // Estados visuais
-  const [isRecording, setIsRecording] = useState(false);
-  const [isConnected, setIsConnected] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [transcript, setTranscript] = useState<string>("");
-  const [finalText, setFinalText] = useState<string>("");
-  const [interimText, setInterimText] = useState<string>("");
-  const [finalOnlyText, setFinalOnlyText] = useState<string>("");
+  // =====================================================
+  // 🎛️ Estados
+  // =====================================================
+  const [isListening, setIsListening] = useState(false);
+  const [recognizedText, setRecognizedText] = useState("");
+  const [statusMessage, setStatusMessage] = useState("Inicializando...");
 
-  // Referências
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  // =====================================================
+  // 🔗 Referências
+  // =====================================================
+  const recognitionRef = useRef<any | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
 
-  // ----------------------------
-  // 1️⃣ Conecta WebSocket (modo comando)
-  // ----------------------------
-  const connectWebSocket = (): Promise<WebSocket> => {
-    return new Promise((resolve, reject) => {
-      try {
-        const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-        const host = window.location.hostname;
-        const ws = new WebSocket(`${protocol}://${host}:8005/ws-stt`);
-
-        ws.onopen = () => {
-          console.log("✅ [Main] WebSocket conectado.");
-          setIsConnected(true);
-          resolve(ws);
-        };
-
-        ws.onerror = (err) => {
-          console.error("⚠️ [Main] Erro no WebSocket:", err);
-          reject(err);
-        };
-
-        ws.onclose = () => {
-          console.warn("🔌 [Main] WebSocket desconectado.");
-          setIsConnected(false);
-        };
-
-        ws.onmessage = async (event) => {
-          try {
-            const msg = JSON.parse(event.data);
-
-            if (msg.type === "partial" || msg.type === "final") {
-              const text = msg.text?.trim() || "";
-              console.log(`💬 [Main] (${msg.type}) → ${text}`);
-
-              if (msg.type === "partial") {
-                setInterimText(text);
-              }
-
-              if (msg.type === "final") {
-                setFinalText((prev) => prev + " " + text);
-                setInterimText("");
-
-                // Quando o texto final completo chega
-                if (msg.final === true) {
-                  setFinalOnlyText(text || "");
-
-                  // ⚙️ Filtro de modo de gravação
-                  if (isRecording) {
-                    console.log("🕓 [Main] Ignorando mensagem (modo passivo):", text);
-                  } else {
-                    try {
-                      // 🔸 Envia o texto final para o backend
-                      const response = await fetch("http://localhost:8000/voice_command", {
-                        method: "POST",
-                        headers: {
-                          "Content-Type": "application/json",
-                        },
-                        body: JSON.stringify({ message: text }),
-                      });
-
-                      if (!response.ok) {
-                        throw new Error(`Erro HTTP: ${response.status}`);
-                      }
-
-                      const data = await response.json();
-                      console.log("🤖 Resposta do sistema:", data);
-
-                    } catch (err) {
-                      console.error("❌ Erro ao enviar comando de voz:", err);
-                    }
-                  }
-
-                  try {
-                    stopRecording(false); // Para a gravação
-                    // Volta ao modo "wake listener" após 1s
-                    setTimeout(() => startWakeListener(), 1000);
-                  } catch (err) {
-                    console.error("Erro ao parar gravação:", err);
-                  }
-                }
-              }
-            }
-          } catch {
-            console.log("📨 [Main] Mensagem não-JSON:", event.data);
-          }
-        };
-      } catch (err) {
-        reject(err);
-      }
-    });
-  };
-
-  // ----------------------------
-  // 2️⃣ Inicia gravação ativa (modo comando)
-  // ----------------------------
-  const startRecording = async () => {
-    try {
-      console.log("🎬 [Main] Iniciando gravação de comando...");
-      setIsLoading(true);
-      const ws = await connectWebSocket();
-      socketRef.current = ws;
-
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mimeType =
-        MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-          ? "audio/webm;codecs=opus"
-          : "audio/webm";
-
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType,
-        audioBitsPerSecond: 128000,
-      });
-      mediaRecorderRef.current = mediaRecorder;
-
-      mediaRecorder.ondataavailable = async (event) => {
-        if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
-          const buf = await event.data.arrayBuffer();
-          ws.send(buf);
-          console.log(`🎧 [Main] Enviado chunk (${event.data.size} bytes)`);
-        }
-      };
-
-      mediaRecorder.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
-        console.log("🛑 [Main] Gravação encerrada, enviando END_OF_STREAM.");
-        if (ws.readyState === WebSocket.OPEN) ws.send("END_OF_STREAM");
-      };
-
-      mediaRecorder.start(250);
-      console.log("🎙️ [Main] Gravando áudio do comando...");
-      setIsRecording(true);
-      setIsLoading(false);
-    } catch (error) {
-      console.error("❌ [Main] Erro ao iniciar gravação:", error);
-      setIsLoading(false);
-    }
-  };
-
-  // ----------------------------
-  // 3️⃣ Escuta passiva ("bob")
-  // ----------------------------
-  const startWakeListener = async () => {
-    try {
-      console.log("🎧 [Wake] Iniciando escuta passiva...");
-      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-      const host = window.location.hostname;
-      const ws = new WebSocket(`${protocol}://${host}:8005/ws-stt`);
-      socketRef.current = ws;
-
-      ws.onopen = async () => {
-        console.log("✅ [Wake] WebSocket conectado (modo passivo).");
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const mimeType =
-          MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-            ? "audio/webm;codecs=opus"
-            : "audio/webm";
-
-        const mediaRecorder = new MediaRecorder(stream, {
-          mimeType,
-          audioBitsPerSecond: 128000,
-        });
-        mediaRecorderRef.current = mediaRecorder;
-
-        mediaRecorder.ondataavailable = async (event) => {
-          if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
-            const buf = await event.data.arrayBuffer();
-            ws.send(buf);
-            console.log(`🎧 [Wake] Enviado chunk (${event.data.size} bytes)`);
-          }
-        };
-
-        ws.onmessage = (event) => {
-          try {
-            const msg = JSON.parse(event.data);
-            if ((msg.type === "partial" || msg.type === "final") && msg.text) {
-              const text = msg.text.toLowerCase().trim();
-              console.log(`🗣️ [Wake] (${msg.type}) → "${text}"`);
-              setTranscript((prev) => prev + "\n" + text);
-
-              if (msg.type === "final" && msg.final === true) {
-                setFinalOnlyText(msg.text || "");
-              }
-
-              if (text.includes("bob")) {
-                console.log("🚀 [Wake] Palavra 'bob' detectada!");
-                try {
-                  mediaRecorder.stop();
-                  stream.getTracks().forEach((t) => t.stop());
-                } catch {}
-                // ❌ NÃO fecha o socket — mantém aberto
-                // ✅ inicia modo comando
-                setTimeout(() => startRecording(), 500);
-              }
-            }
-          } catch (err) {
-            console.error("⚠️ [Wake] Erro ao processar mensagem:", err);
-          }
-        };
-
-        mediaRecorder.start(250);
-        console.log("🎙️ [Wake] Microfone ativo — diga 'bob' para ativar.");
-      };
-
-      ws.onerror = (err) => console.error("⚠️ [Wake] Erro no WebSocket:", err);
-      ws.onclose = () => console.log("🔌 [Wake] Listener encerrado.");
-    } catch (err) {
-      console.error("❌ [Wake] Erro ao iniciar listener:", err);
-    }
-  };
-
-  // ----------------------------
-  // 4️⃣ Parar gravação (sem fechar WebSocket)
-  // ----------------------------
-  const stopRecording = (closeSocket: boolean = false) => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      console.log("🛑 [Main] Encerrando gravação...");
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-    }
-    if (closeSocket && socketRef.current?.readyState === WebSocket.OPEN) {
-      console.log("🔌 Encerrando WebSocket conforme solicitado.");
-      socketRef.current.close();
-      setIsConnected(false);
-    }
-  };
-
-  // 🧩 Inicia automaticamente o listener ao abrir a tela
+  // =====================================================
+  // 🧠 Inicializa reconhecimento e WebSocket único
+  // =====================================================
   useEffect(() => {
-    startWakeListener();
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      alert("Seu navegador não suporta reconhecimento de voz (Web Speech API).");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = "pt-BR";
+    recognition.continuous = true;
+    recognition.interimResults = true;
+
+    recognition.onstart = () => {
+      setIsListening(true);
+      console.log("🎙️ Reconhecimento iniciado.");
+      setStatusMessage("🎧 Escutando... diga 'bob' para ativar.");
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+      console.log("🛑 Reconhecimento finalizado.");
+      // Reinicia automaticamente a escuta
+      setTimeout(() => {
+        recognition.start();
+      }, 800);
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error("⚠️ Erro no reconhecimento:", event.error);
+      setStatusMessage("❌ Erro no reconhecimento de voz.");
+    };
+
+    recognition.onresult = (event: any) => {
+      let text = "";
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        text += event.results[i][0].transcript;
+      }
+      text = text.trim().toLowerCase();
+      setRecognizedText(text);
+
+      if (text.includes("bob")) {
+        console.log("🚀 Hotword detectada: bob");
+        setStatusMessage("🟢 Hotword detectada — enviando ao servidor...");
+        recognition.stop(); // pausa o reconhecimento para evitar loop
+        sendHotword("bob");
+      }
+    };
+
+    recognitionRef.current = recognition;
+    connectSocket();
+    recognition.start();
+
     return () => {
-      stopRecording(true); // encerra gravação e socket ao sair da página
+      recognition.stop();
+      socketRef.current?.close();
     };
   }, []);
 
-  // ----------------------------
-  // 5️⃣ Interface
-  // ----------------------------
-  const buttonState = isLoading
-    ? "loading"
-    : isRecording
-    ? "recording"
-    : "idle";
+  // =====================================================
+  // 🔌 WebSocket Único
+  // =====================================================
+  const connectSocket = () => {
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const host = window.location.hostname;
+    const ws = new WebSocket(`${protocol}://${host}:8005/ws-hotword`);
+
+    ws.onopen = () => {
+      console.log("👂 [HOTWORD] Conectado ao servidor");
+      setStatusMessage("🎧 Detector ativo — diga 'bob' para iniciar comando.");
+    };
+
+    ws.onmessage = (e) => {
+      console.log("📩 [SERVER]", e.data);
+      setStatusMessage(e.data);
+    };
+
+    ws.onclose = () => {
+      console.log("🔌 [HOTWORD] Conexão encerrada — aguardando próxima hotword.");
+      setStatusMessage("🕓 Aguardando nova hotword...");
+      socketRef.current = null; // limpa o socket
+    };
+
+
+    ws.onerror = (e) => {
+      console.error("⚠️ [HOTWORD] Erro", e);
+      setStatusMessage("❌ Erro na conexão com o servidor.");
+    };
+
+    socketRef.current = ws;
+  };
+
+  // =====================================================
+  // 📤 Envia apenas a hotword
+  // =====================================================
+  const sendHotword = (text: string) => {
+    const ws = socketRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(text);
+      console.log("📤 [CLIENTE] Enviado:", text);
+    } else {
+      console.warn("⚠️ WebSocket não está aberto.");
+      setStatusMessage("⚠️ Não foi possível enviar a hotword.");
+    }
+  };
+
+  // =====================================================
+  // 🎨 Interface
+  // =====================================================
+  const buttonState = isListening ? "recording" : "idle";
 
   return (
     <div className="min-h-screen bg-gradient-primary">
       <div className="container mx-auto px-4 py-12">
+        {/* Botão Voltar */}
         <button
           onClick={() => navigate("/")}
           className="inline-flex items-center space-x-2 text-muted-foreground hover:text-foreground transition-colors duration-200 mb-8"
@@ -272,64 +145,69 @@ const WebVoice_test = () => {
           <span>Back to Home</span>
         </button>
 
-        <div className="text-center mb-10">
-          <h1 className="text-4xl font-bold text-foreground mb-2">
-            WebSocket Voice Control
+        {/* Cabeçalho */}
+        <div className="text-center mb-16">
+          <h1 className="text-4xl font-bold text-foreground mb-4">
+            Voice Hotword Test
           </h1>
-          <p className="text-muted-foreground">
-            Say "bob" to activate the command mode
+          <p className="text-lg text-muted-foreground max-w-md mx-auto">
+            A escuta começa automaticamente. Diga “bob” e a conexão será encerrada após o envio.
           </p>
         </div>
 
+        {/* Status */}
+        <div className="text-center mb-6">
+          <p className="text-sm text-tech-blue">{statusMessage}</p>
+        </div>
+
+        {/* Texto reconhecido */}
+        <div className="flex flex-col items-center space-y-4 mb-10">
+          <textarea
+            readOnly
+            value={recognizedText}
+            className="w-96 h-40 p-4 rounded-lg border border-border/50 bg-background/50 text-foreground resize-none focus:outline-none"
+          />
+          <p className="text-muted-foreground text-sm">Texto reconhecido em tempo real</p>
+        </div>
+
+        {/* Botão principal */}
         <div className="flex flex-col items-center justify-center space-y-8">
           <button
-            onClick={() =>
-              isRecording ? stopRecording() : startRecording()
-            }
-            disabled={isLoading}
+            onClick={() => {
+              const recognition = recognitionRef.current;
+              if (recognition) {
+                if (isListening) {
+                  recognition.stop();
+                  setStatusMessage("🛑 Escuta parada manualmente.");
+                } else {
+                  recognition.start();
+                  setStatusMessage("🎧 Escutando novamente...");
+                }
+                setIsListening(!isListening);
+              }
+            }}
             className={`relative w-32 h-32 rounded-full transition-all duration-300 transform active:scale-95 ${
               buttonState === "recording"
                 ? "bg-gradient-hover shadow-glow animate-pulse"
-                : buttonState === "loading"
-                ? "bg-muted cursor-not-allowed"
                 : "bg-gradient-accent hover:bg-gradient-hover shadow-card hover:shadow-hover hover:scale-105"
             }`}
           >
             <div className="flex items-center justify-center w-full h-full">
               {buttonState === "recording" ? (
-                <Square
-                  size={48}
-                  className="text-primary-foreground"
-                  fill="currentColor"
-                />
-              ) : buttonState === "loading" ? (
-                <div className="w-12 h-12 border-4 border-muted-foreground border-t-transparent rounded-full animate-spin" />
+                <Square size={48} className="text-primary-foreground" fill="currentColor" />
               ) : (
                 <Mic size={48} className="text-primary-foreground" />
               )}
             </div>
           </button>
 
-          <p className="text-center text-foreground text-lg">
-            {buttonState === "idle" && "Tap to start recording"}
-            {buttonState === "recording" && "Recording... Tap to stop"}
-            {buttonState === "loading" && "Connecting..."}
+          <p className="text-sm text-muted-foreground">
+            {isListening ? "Escutando automaticamente..." : "Clique para iniciar manualmente"}
           </p>
-
-          <div className={`text-sm ${isConnected ? "text-green-500" : "text-red-500"}`}>
-            {isConnected ? "Connected to WebSocket" : "Not connected"}
-          </div>
-        </div>
-
-        <div className="mt-10 max-w-2xl mx-auto bg-gradient-card rounded-xl p-6 text-foreground border border-border/50 shadow-card">
-          <h3 className="font-semibold mb-2">Transcription:</h3>
-          <pre className="whitespace-pre-wrap text-sm text-muted-foreground">
-            {finalOnlyText || "Listening..."}
-          </pre>
         </div>
       </div>
     </div>
   );
 };
 
-export default WebVoice_test;
+export default Voice_STT_Test;

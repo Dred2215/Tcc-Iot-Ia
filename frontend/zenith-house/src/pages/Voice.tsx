@@ -1,98 +1,163 @@
+// src/pages/Voice.tsx
+import { useEffect, useState, useRef } from "react";
 import { ArrowLeft, Mic, Square } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { useState, useRef } from "react";
 
 const Voice = () => {
   const navigate = useNavigate();
+
   const [isRecording, setIsRecording] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
+  const [connectionMessage, setConnectionMessage] = useState("");
+  const [hotwordMessage, setHotwordMessage] = useState("");
+  const [inputText, setInputText] = useState(""); // 🆕 texto digitado (simulação de fala)
+  const socketRef = useRef<WebSocket | null>(null);
+  const hotwordRef = useRef<WebSocket | null>(null);
 
-  const startRecording = async () => {
+  // =====================================================
+  // 🧠 HOTWORD - conecta automaticamente ao abrir a tela
+  // =====================================================
+  const connectHotwordWebSocket = () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-      audioChunksRef.current = [];
+      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+      const host = window.location.hostname;
+      const ws = new WebSocket(`${protocol}://${host}:8005/ws-hotword`);
 
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
+      ws.onopen = () => {
+        console.log("👂 [HOTWORD] Conectado.");
+        setHotwordMessage("✅ Detector de hotword ativo (diga ou digite 'bob').");
+      };
+
+      ws.onmessage = (event) => {
+        console.log("📩 [HOTWORD]", event.data);
+        setHotwordMessage(event.data);
+
+        // Quando o servidor detectar a hotword, ativa o modo voz
+        // ✅ Agora só ativa se a mensagem realmente indicar detecção
+        if (
+          event.data.toLowerCase().includes("hotword detectada") ||
+          event.data.toLowerCase().startsWith("🚀")
+        ) {
+          console.log("🎯 Hotword confirmada pelo servidor, ativando modo comando...");
+          ws.close();
+          connectVoiceWebSocket();
+        }
+
+      };
+
+      ws.onerror = (error) => {
+        console.error("⚠️ [HOTWORD] Erro:", error);
+        setHotwordMessage("❌ Erro no detector de hotword.");
+      };
+
+      ws.onclose = () => {
+        console.log("🔌 [HOTWORD] Conexão encerrada.");
+      };
+
+      hotwordRef.current = ws;
+    } catch (error) {
+      console.error("Erro ao conectar hotword:", error);
+      setHotwordMessage("❌ Falha ao conectar hotword.");
+    }
+  };
+
+  // =====================================================
+  // 🎙️ VOICE - ativa após hotword ser detectada
+  // =====================================================
+  const connectVoiceWebSocket = async (): Promise<void> => {
+    try {
+      setIsLoading(true);
+      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+      const host = window.location.hostname;
+      const ws = new WebSocket(`${protocol}://${host}:8005/ws-voice`);
+
+      ws.onopen = () => {
+        console.log("🎧 [VOICE] Conectado.");
+        setConnectionMessage("✅ Modo comando ativo!");
+        setIsRecording(true);
+        setIsLoading(false);
+      };
+
+      ws.onmessage = (event) => {
+        console.log("📩 [VOICE]", event.data);
+        setConnectionMessage(event.data);
+
+        // Quando o servidor indicar que o comando foi processado
+        if (event.data.toLowerCase().includes("comando processado")) {
+          ws.close(); // encerra o modo voz
+          setTimeout(connectHotwordWebSocket, 1000); // reativa o hotword após 1s
         }
       };
 
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        await sendAudioToEndpoint(audioBlob);
-        
-        // Stop all tracks to release microphone
-        stream.getTracks().forEach(track => track.stop());
+      ws.onerror = (error) => {
+        console.error("⚠️ [VOICE] Erro:", error);
+        setConnectionMessage("❌ Erro ao conectar ao servidor de voz.");
+        setIsLoading(false);
       };
 
-      mediaRecorder.start();
-      setIsRecording(true);
+      ws.onclose = () => {
+        console.log("🔌 [VOICE] Conexão encerrada.");
+        setIsRecording(false);
+        setConnectionMessage("🔌 Servidor de voz desconectado.");
+      };
+
+      socketRef.current = ws;
     } catch (error) {
-      console.error('Error accessing microphone:', error);
-      alert('Erro ao acessar o microfone. Verifique as permissões.');
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-      setIsLoading(true);
-    }
-  };
-
-  const sendAudioToEndpoint = async (audioBlob: Blob) => {
-    try {
-      const formData = new FormData();
-      formData.append('audio', audioBlob, 'recording.webm');
-
-      const baseUrl = (import.meta.env.VITE_BACKEND_BASE_URL as string | undefined) ?? "";
-      const endpoint = baseUrl ? `${baseUrl.replace(/\/$/, "")}/record` : "/record";
-
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => 'Failed to send audio');
-        throw new Error(errorText || 'Failed to send audio');
-      }
-
-      const result = await response.json().catch(() => null);
-      console.log('Audio sent successfully', result);
-    } catch (error) {
-      console.error('Error sending audio:', error);
-    } finally {
+      console.error("Erro ao conectar ao WebSocket:", error);
+      setConnectionMessage("❌ Falha ao conectar ao servidor de voz.");
       setIsLoading(false);
     }
   };
 
-  const handleButtonClick = () => {
-    if (isRecording) {
-      stopRecording();
-    } else if (!isLoading) {
-      startRecording();
+  // =====================================================
+  // 🔄 Controle de ciclo de vida da tela
+  // =====================================================
+  useEffect(() => {
+    connectHotwordWebSocket();
+
+    return () => {
+      // Fecha conexões ao sair
+      if (hotwordRef.current?.readyState === WebSocket.OPEN) hotwordRef.current.close();
+      if (socketRef.current?.readyState === WebSocket.OPEN) socketRef.current.close();
+    };
+  }, []);
+
+  // =====================================================
+  // 🎤 Simulação de fala - decide o que ativar
+  // =====================================================
+  const handleSimulateVoice = () => {
+    const text = inputText.trim().toLowerCase();
+    if (!text) return;
+
+    // Caso 1: Hotword detectada
+    if (text.includes("bob")) {
+      if (hotwordRef.current?.readyState === WebSocket.OPEN) {
+        hotwordRef.current.send("bob");
+        setHotwordMessage("🚀 Hotword detectada!");
+      }
     }
+    // Caso 2: Comando
+    else if (isRecording && socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(text);
+      setConnectionMessage(`🎤 Comando enviado: "${text}"`);
+    }
+    // Caso 3: Nada conectado
+    else {
+      setConnectionMessage("⚠️ Nenhum modo ativo no momento.");
+    }
+
+    setInputText("");
   };
 
-  const getButtonState = () => {
-    if (isLoading) return 'loading';
-    if (isRecording) return 'recording';
-    return 'idle';
-  };
-
-  const buttonState = getButtonState();
+  // =====================================================
+  // 🎙️ Botão principal (design original)
+  // =====================================================
+  const buttonState = isLoading ? "loading" : isRecording ? "recording" : "idle";
 
   return (
     <div className="min-h-screen bg-gradient-primary">
       <div className="container mx-auto px-4 py-12">
-        {/* Back button */}
+        {/* Botão Voltar */}
         <button
           onClick={() => navigate("/")}
           className="inline-flex items-center space-x-2 text-muted-foreground hover:text-foreground transition-colors duration-200 mb-8"
@@ -101,80 +166,75 @@ const Voice = () => {
           <span>Back to Home</span>
         </button>
 
-        {/* Header */}
+        {/* Cabeçalho */}
         <div className="text-center mb-16">
-          <h1 className="text-4xl font-bold text-foreground mb-4">
-            Voice Control
-          </h1>
+          <h1 className="text-4xl font-bold text-foreground mb-4">Voice Control</h1>
           <p className="text-lg text-muted-foreground max-w-md mx-auto">
-            Click the microphone to record your voice command
+            Type your voice command below to simulate what you would say aloud.
           </p>
         </div>
 
-        {/* Voice Recording Button */}
+        {/* Status do hotword */}
+        <div className="text-center mb-6">
+          <p className="text-sm text-tech-blue">{hotwordMessage}</p>
+        </div>
+
+        {/* Caixa de simulação de fala */}
+        <div className="flex flex-col items-center space-y-4 mb-10">
+          <input
+            type="text"
+            placeholder="Ex: bob, ligar a luz..."
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSimulateVoice()}
+            className="px-4 py-2 rounded-lg w-80 border border-border/50 bg-background/50 text-foreground focus:outline-none focus:ring-2 focus:ring-tech-blue transition"
+          />
+          <button
+            onClick={handleSimulateVoice}
+            className="px-6 py-2 rounded-md bg-gradient-accent hover:bg-gradient-hover shadow-md text-primary-foreground transition"
+          >
+            Simular Fala
+          </button>
+        </div>
+
+        {/* Botão principal */}
         <div className="flex flex-col items-center justify-center space-y-8">
           <button
-            onClick={handleButtonClick}
             disabled={isLoading}
             className={`relative w-32 h-32 rounded-full transition-all duration-300 transform active:scale-95 ${
-              buttonState === 'recording'
-                ? 'bg-gradient-hover shadow-glow animate-pulse'
-                : buttonState === 'loading'
-                ? 'bg-muted cursor-not-allowed'
-                : 'bg-gradient-accent hover:bg-gradient-hover shadow-card hover:shadow-hover hover:scale-105'
+              buttonState === "recording"
+                ? "bg-gradient-hover shadow-glow animate-pulse"
+                : buttonState === "loading"
+                ? "bg-muted cursor-not-allowed"
+                : "bg-gradient-accent hover:bg-gradient-hover shadow-card hover:shadow-hover hover:scale-105"
             }`}
           >
             <div className="flex items-center justify-center w-full h-full">
-              {buttonState === 'recording' ? (
+              {buttonState === "recording" ? (
                 <Square size={48} className="text-primary-foreground" fill="currentColor" />
-              ) : buttonState === 'loading' ? (
+              ) : buttonState === "loading" ? (
                 <div className="w-12 h-12 border-4 border-muted-foreground border-t-transparent rounded-full animate-spin" />
               ) : (
                 <Mic size={48} className="text-primary-foreground" />
               )}
             </div>
-            
-            {/* Recording indicator ring */}
-            {buttonState === 'recording' && (
+
+            {buttonState === "recording" && (
               <div className="absolute inset-0 rounded-full border-4 border-tech-blue animate-ping opacity-30" />
             )}
           </button>
 
-          {/* Status Text */}
+          {/* Status */}
           <div className="text-center">
             <p className="text-xl font-medium text-foreground mb-2">
-              {buttonState === 'idle' && 'Tap to start recording'}
-              {buttonState === 'recording' && 'Recording... Tap to stop'}
-              {buttonState === 'loading' && 'Processing audio...'}
+              {buttonState === "idle" && "Waiting for hotword..."}
+              {buttonState === "recording" && "Listening for command..."}
+              {buttonState === "loading" && "Connecting..."}
             </p>
-            
-            {buttonState === 'recording' && (
-              <div className="flex items-center justify-center space-x-2 text-tech-blue">
-                <div className="w-2 h-2 bg-tech-blue rounded-full animate-pulse" />
-                <span className="text-sm">Listening</span>
-              </div>
-            )}
-          </div>
-        </div>
 
-        {/* Instructions */}
-        <div className="max-w-md mx-auto mt-16">
-          <div className="bg-gradient-card rounded-2xl p-6 shadow-card border border-border/50">
-            <h3 className="font-semibold text-foreground mb-3">Instructions:</h3>
-            <ul className="space-y-2 text-sm text-muted-foreground">
-              <li className="flex items-center space-x-2">
-                <div className="w-1.5 h-1.5 bg-tech-blue rounded-full" />
-                <span>Click to start recording</span>
-              </li>
-              <li className="flex items-center space-x-2">
-                <div className="w-1.5 h-1.5 bg-tech-blue rounded-full" />
-                <span>Speak your command clearly</span>
-              </li>
-              <li className="flex items-center space-x-2">
-                <div className="w-1.5 h-1.5 bg-tech-blue rounded-full" />
-                <span>Click again to stop and send</span>
-              </li>
-            </ul>
+            {connectionMessage && (
+              <p className="text-sm text-muted-foreground mt-1">{connectionMessage}</p>
+            )}
           </div>
         </div>
       </div>
