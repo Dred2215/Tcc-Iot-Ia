@@ -3,6 +3,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { VoicePresenceProvider } from "./context/VoicePresenceContext";
 import Home from "./pages/Home";
 import Register from "./pages/Register";
 import Text from "./pages/Text";
@@ -19,19 +20,21 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/register" element={<Register />} />
-          <Route path="/text" element={<Text />} />
-          <Route path="/voice" element={<Voice />} />
-          <Route path="/webvoice" element={<WebVoice />} /> {/* 🆕 Nova rota */}
-          <Route path="/webvoice_test" element={<WebVoice_test />} /> 
-          <Route path="/login" element={<Login />} />
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
+      <VoicePresenceProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/register" element={<Register />} />
+            <Route path="/text" element={<Text />} />
+            <Route path="/voice" element={<Voice />} />
+            <Route path="/webvoice" element={<WebVoice />} /> {/* 🆕 Nova rota */}
+            <Route path="/webvoice_test" element={<WebVoice_test />} /> 
+            <Route path="/login" element={<Login />} />
+            {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </BrowserRouter>
+      </VoicePresenceProvider>
     </TooltipProvider>
   </QueryClientProvider>
 );

@@ -1,5 +1,5 @@
 import asyncio
-from dispositivos import Lampada, Portao
+from dispositivos import Lampada, Portao, SensorPortao
 from config_tuya import openapi, home_id
 
 # Containers vazios (serão preenchidos na inicialização)
@@ -11,7 +11,8 @@ def inicializar_dispositivos():
     print("🔄 Inicializando dispositivos...")
 
     DISPOSITIVOS = {
-        "lampada": Lampada("Luz", "eb20e4ad6247150831lufg", openapi)
+        "lampada": Lampada("Luz", "eb20e4ad6247150831lufg", openapi),
+        "sensor_portao": SensorPortao("Sensor Portão", "eba6dbc576c6cb89d0ndap", openapi)  # ✅ novo dispositivo
     }
 
     CENAS = {
@@ -19,6 +20,7 @@ def inicializar_dispositivos():
     }
 
     print("✅ Dispositivo 'Luz' inicializado.")
+    print("✅ Dispositivo 'Sensor Portão' inicializado.")
     print("✅ Dispositivo de cena 'Portão Garagem' inicializado.")
     print("✅ Dispositivos e cenas inicializados.")
 
@@ -77,6 +79,20 @@ async def executar_comando(idx, cmd):
     if isinstance(additional, int) and additional > 0:
         print(f"Aguardando {additional} segundos antes de executar...")
         await asyncio.sleep(additional)
+
+    # 🧩 Nova lógica: Verificação de status específica
+    if action == "status" and parameter:
+        print(f"🔍 Consultando status específico '{parameter}' do dispositivo '{device}'...")
+        res = alvo.status()
+        if isinstance(res, dict) and "result" in res:
+            for item in res["result"]:
+                if item["code"] == parameter:
+                    print(f"✅ {device} → {parameter}: {item['value']}")
+                    return
+            print(f"⚠️ Parâmetro '{parameter}' não encontrado no status de '{device}'.")
+        else:
+            print(f"❌ Erro: status de '{device}' não retornou um dicionário esperado.")
+        return
 
     # Executa ação
     if hasattr(alvo, action):

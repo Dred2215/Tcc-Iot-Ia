@@ -67,7 +67,7 @@ class MensagemRequest(BaseModel):
 # ✅ Endpoint de notificação
 @app.post("/notificar-mensagem-ia")
 async def notificar_mensagem_ia(req: MensagemRequest):
-    print(f"[LOG] Corpo recebido: mensagem='{req.mensagem}', comando='{req.comando}', tipo='{req.tipo}'")
+    print(f"[MESSAGE] Corpo recebido: mensagem='{req.mensagem}', comando='{req.comando}', tipo='{req.tipo}'")
 
     # Estrutura interna
     class IA:

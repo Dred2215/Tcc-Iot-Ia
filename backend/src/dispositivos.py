@@ -16,10 +16,17 @@ class DispositivoBase:
 
     def status(self):
         """Obtém status do dispositivo"""
-        res = openapi.get(f'/v1.0/iot-03/devices/{self.device_id}/status')
+        # 🔹 Nova verificação de conectividade real (linha adicionada)
+        info = self.openapi.get(f"/v1.0/iot-03/devices/{self.device_id}")
+        online = info["result"].get("online", False)
+        print(f"🌐 Conectividade: {'✅ Online' if online else '❌ Offline'}")
+
+        # 🔹 Mantém o código original
+        res = self.openapi.get(f"/v1.0/iot-03/devices/{self.device_id}/status")
         print(f"📄 Status de {self.nome}:")
         for item in res.get("result", []):
-            print(f"{item['code']}: {item['value']}")
+            print(f" - {item['code']}: {item['value']}")
+        return res
 
 
 
@@ -99,12 +106,24 @@ class Lampada(DispositivoBase):
     def definir_cena(self, cena_json): self._executar("scene_data_v2", cena_json)
     def definir_musica(self, musica_json): self._executar("music_data", musica_json)
 
-# 🚪 Sensor de portão
+# 🚪 Sensor de Portão
 class SensorPortao(DispositivoBase):
     def estado_portao(self):
-        res = self.status()
-        # Aqui poderia filtrar apenas "doorcontact_state"
-        return res
+        """Retorna o estado atual do portão (True = Aberto, False = Fechado)"""
+        try:
+            res = self.openapi.get(f'/v1.0/iot-03/devices/{self.device_id}/status')
+            for item in res.get("result", []):
+                if item["code"] == "doorcontact_state":
+                    estado = item["value"]
+                    status_texto = "🚪 Aberto" if estado else "🔒 Fechado"
+                    print(f"{self.nome}: {status_texto}")
+                    return estado
+            print(f"⚠️ Código 'doorcontact_state' não encontrado para {self.nome}.")
+            return None
+        except Exception as e:
+            print(f"❌ Erro ao obter estado do portão: {e}")
+            return None
+
 
 
 # 🎮 Controle IR/RF universal

@@ -4,9 +4,21 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { checkAuth } from "@/services/auth_user";
 
+
+
+
+
 const Home = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const hasRefreshed = sessionStorage.getItem("home_refreshed");
+    if (!hasRefreshed) {
+      sessionStorage.setItem("home_refreshed", "true");
+      window.location.reload();
+    }
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -80,7 +92,7 @@ const Home = () => {
             title="Voice Control"
             description="Speak naturally to your smart home"
             icon={<Mic size={48} />}
-            route="/voice"
+            route="/webvoice_test"
           />
 
           <ButtonCard
