@@ -75,10 +75,14 @@ async def executar_comando(idx, cmd):
         print(f"[ERRO] '{device}' não encontrado nem em DISPOSITIVOS nem em CENAS.")
         return
 
-    # Delay opcional (não bloqueante!)
+    # Delay opcional (não bloqueante)
     if isinstance(additional, int) and additional > 0:
         print(f"Aguardando {additional} segundos antes de executar...")
         await asyncio.sleep(additional)
+
+    # 🔄 Tradução de ações especiais
+    if device == "sensor_portao" and action == "verificar_estado":
+        action = "estado_portao"
 
     # 🧩 Nova lógica: Verificação de status específica
     if action == "status" and parameter:
@@ -101,11 +105,12 @@ async def executar_comando(idx, cmd):
             if action == "definir_cor" and isinstance(parameter, str):
                 h, s, v = processar_cor(parameter)
                 metodo(h, s, v)
-            # Verifica se o parâmetro existe e não é uma string vazia
             elif parameter is not None and parameter != "":
                 metodo(int(parameter))
             else:
-                metodo()
+                resultado = metodo()
+                if resultado is not None:
+                    print(f"📊 Resultado: {resultado}")
             print(f"[OK] {action} executado em {alvo_tipo} '{device}'.")
         except TypeError as e:
             print(f"[ERRO] Falha ao executar {action} em {device}: {e}")
@@ -123,26 +128,40 @@ async def executar_comando(idx, cmd):
             print(f"[ERRO] Ação '{action}' não encontrada para {alvo_tipo} '{device}'.")
 
 
+
 async def processar_resposta(respostaIA):
-    # Normaliza entrada
+    # 🔍 Normaliza entrada
     if isinstance(respostaIA, list):
         iot_cmds = respostaIA
+
     elif isinstance(respostaIA, dict):
-        if "IOT_command" in respostaIA and isinstance(respostaIA["IOT_command"], list):
+        # Caso 1: Formato novo da IA → {"type": "IOT", "content_message": {...}, "friendly_message": "..."}
+        if respostaIA.get("type") == "IOT" and "content_message" in respostaIA:
+            iot_cmds = [respostaIA["content_message"]]
+            print(f"📦 [NORMALIZAÇÃO] Extraído comando único de 'content_message'.")
+
+        # Caso 2: Formato padrão anterior → {"IOT_command": [ ... ]}
+        elif "IOT_command" in respostaIA and isinstance(respostaIA["IOT_command"], list):
             iot_cmds = respostaIA["IOT_command"]
+            print(f"📦 [NORMALIZAÇÃO] Extraída lista de 'IOT_command'.")
+
+        # Caso 3: Formato isolado de comando direto
         else:
             iot_cmds = [respostaIA]
+            print(f"📦 [NORMALIZAÇÃO] Tratando resposta como comando direto.")
+
     else:
-        print("Nenhuma resposta válida da IA.")
+        print("❌ Nenhuma resposta válida da IA.")
         return
 
     if not iot_cmds:
-        print("Nenhuma ação encontrada.")
+        print("⚠️ Nenhuma ação encontrada.")
         return
 
-    # Cria e dispara tarefas simultâneas
+    # 🚀 Executa todos os comandos em paralelo
     tarefas = [executar_comando(idx, cmd) for idx, cmd in enumerate(iot_cmds, start=1)]
     await asyncio.gather(*tarefas)
+
 
 
 def processar_cor(nome_cor: str):

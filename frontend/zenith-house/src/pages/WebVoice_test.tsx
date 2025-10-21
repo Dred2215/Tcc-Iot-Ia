@@ -5,6 +5,9 @@ import { useNavigate } from "react-router-dom";
 const Voice_STT_Test = () => {
   const navigate = useNavigate();
 
+
+  
+
   // =====================================================
   // 🎛️ Estados
   // =====================================================
@@ -17,6 +20,36 @@ const Voice_STT_Test = () => {
   // =====================================================
   const recognitionRef = useRef<any | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
+  const isCommandMode = useRef(false);
+  const commandText = useRef("");
+  const commandTimer = useRef<any>(null);
+
+  // ⏱️ Timer de 10s após detectar "bob"
+  const commandStartTimer = () => {
+    clearTimeout(commandTimer.current);
+    commandTimer.current = setTimeout(() => {
+      console.log("⏰ Tempo limite atingido — enviando comando final.");
+      finalizeCommand();
+    }, 10000); // 10 segundos
+  };
+
+  // 📨 Finaliza e envia o comando ao servidor
+  const finalizeCommand = () => {
+    clearTimeout(commandTimer.current);
+
+    if (commandText.current.trim() !== "") {
+      sendVoiceCommand(commandText.current.trim());
+    } else {
+      console.warn("⚠️ Nenhum comando detectado.");
+    }
+
+    // Reset
+    isCommandMode.current = false;
+    commandText.current = "";
+    const recognition = recognitionRef.current;
+    if (recognition) recognition.stop();
+  };
+
 
   // =====================================================
   // 🧠 Inicializa reconhecimento e WebSocket único
@@ -60,16 +93,34 @@ const Voice_STT_Test = () => {
       for (let i = event.resultIndex; i < event.results.length; ++i) {
         text += event.results[i][0].transcript;
       }
+
       text = text.trim().toLowerCase();
       setRecognizedText(text);
 
-      if (text.includes("bob")) {
+      // ================================
+      // 🔎 Detecção da hotword "bob"
+      // ================================
+      if (text.includes("bob") && !isCommandMode.current) {
         console.log("🚀 Hotword detectada: bob");
-        setStatusMessage("🟢 Hotword detectada — enviando ao servidor...");
-        recognition.stop(); // pausa o reconhecimento para evitar loop
-        sendHotword("bob");
+        setStatusMessage("🟢 Hotword detectada — aguardando comando...");
+        isCommandMode.current = true; // ativa modo comando
+        commandText.current = ""; // zera o buffer
+        commandStartTimer();
+      }
+
+      // Se já estamos no modo comando, acumular texto
+      if (isCommandMode.current) {
+        commandText.current = text;
+
+        // Se resultado final detectado antes do timeout
+        const lastResult = event.results[event.results.length - 1];
+        if (lastResult.isFinal) {
+          console.log("✅ Fala final detectada — enviando antes do timeout.");
+          finalizeCommand();
+        }
       }
     };
+
 
     recognitionRef.current = recognition;
     connectSocket();
@@ -87,7 +138,7 @@ const Voice_STT_Test = () => {
   const connectSocket = () => {
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
     const host = window.location.hostname;
-    const ws = new WebSocket(`${protocol}://${host}:8005/ws-hotword`);
+    const ws = new WebSocket(`${protocol}://${host}:8008/ws-hotword`);
 
     ws.onopen = () => {
       console.log("👂 [HOTWORD] Conectado ao servidor");
@@ -115,18 +166,49 @@ const Voice_STT_Test = () => {
   };
 
   // =====================================================
-  // 📤 Envia apenas a hotword
+  // 🔌 WebSocket de Comando (VOICE)
   // =====================================================
-  const sendHotword = (text: string) => {
-    const ws = socketRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) {
+  const sendVoiceCommand = (text: string) => {
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const host = window.location.hostname;
+    const ws = new WebSocket(`${protocol}://${host}:8008/ws-voice`);
+
+    ws.onopen = () => {
+      console.log("🎤 [VOICE] Conectado ao servidor.");
       ws.send(text);
-      console.log("📤 [CLIENTE] Enviado:", text);
-    } else {
-      console.warn("⚠️ WebSocket não está aberto.");
-      setStatusMessage("⚠️ Não foi possível enviar a hotword.");
-    }
+      console.log("📤 [VOICE] Comando enviado:", text);
+      setStatusMessage("📨 Comando enviado ao servidor.");
+    };
+
+    ws.onmessage = (e) => {
+      console.log("🤖 [SERVER VOICE]", e.data);
+      setStatusMessage(e.data);
+    };
+
+    ws.onclose = () => {
+      console.log("🔌 [VOICE] Conexão encerrada.");
+    };
+
+    ws.onerror = (e) => {
+      console.error("⚠️ [VOICE] Erro:", e);
+      setStatusMessage("❌ Erro ao enviar comando ao servidor.");
+    };
   };
+
+
+  // // =====================================================
+  // // 📤 Envia apenas a hotword
+  // // =====================================================
+  // const sendHotword = (text: string) => {
+  //   const ws = socketRef.current;
+  //   if (ws && ws.readyState === WebSocket.OPEN) {
+  //     ws.send(text);
+  //     console.log("📤 [CLIENTE] Enviado:", text);
+  //   } else {
+  //     console.warn("⚠️ WebSocket não está aberto.");
+  //     setStatusMessage("⚠️ Não foi possível enviar a hotword.");
+  //   }
+  // };
 
   // =====================================================
   // 🎨 Interface

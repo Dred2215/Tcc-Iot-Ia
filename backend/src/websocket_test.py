@@ -1,9 +1,28 @@
+import os
 import asyncio
+import json
+import aiohttp
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
 import uvicorn
+from tratamento_response_IA import inicializar_dispositivos, processar_resposta
+
+# ======================================================
+# 🌍 Carrega variáveis de ambiente
+# ======================================================
+load_dotenv()
+WEBHOOK_RECEIVE_MESSAGE = os.getenv("WEBHOOK_RECIVE_MESSAGE")
+
+if not WEBHOOK_RECEIVE_MESSAGE:
+    print("⚠️ Aviso: Variável WEBHOOK_RECIVE_MESSAGE não encontrada no .env.")
 
 app = FastAPI()
+
+# ======================================================
+# ⚙️ Inicialização de dispositivos Tuya
+# ======================================================
+inicializar_dispositivos()
 
 # ======================================================
 # 🌐 CORS
@@ -17,13 +36,10 @@ app.add_middleware(
 )
 
 # ======================================================
-# 👂 WebSocket HOTWORD (simples)
+# 👂 WebSocket HOTWORD (aguarda "bob" e encerra)
 # ======================================================
 @app.websocket("/ws-hotword")
 async def websocket_hotword(websocket: WebSocket):
-    """
-    WebSocket simples: aguarda a palavra 'bob' e fecha a conexão.
-    """
     await websocket.accept()
     print("👂 [HOTWORD] Cliente conectado")
     await websocket.send_text("✅ Detector ativo. Diga 'bob' para iniciar comando.")
@@ -50,7 +66,75 @@ async def websocket_hotword(websocket: WebSocket):
 
 
 # ======================================================
+# 🎙️ WebSocket VOICE (envia mensagem ao webhook e executa resposta)
+# ======================================================
+@app.websocket("/ws-voice")
+async def websocket_voice(websocket: WebSocket):
+    """
+    Recebe o comando completo do frontend e envia para o webhook
+    definido em WEBHOOK_RECIVE_MESSAGE. Depois, envia o retorno para
+    o tratamento_response_IA.py, que executa o comando nos dispositivos.
+    """
+    await websocket.accept()
+    print("🎤 [VOICE] Cliente conectado")
+    await websocket.send_text("🟢 Conexão de voz estabelecida com o servidor.")
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            while True:
+                # 🗣️ Recebe mensagem do frontend
+                data = await websocket.receive_text()
+                print(f"📩 [VOICE] Mensagem recebida: {data}")
+
+                if not WEBHOOK_RECEIVE_MESSAGE:
+                    await websocket.send_text("⚠️ Nenhum webhook configurado no servidor.")
+                    continue
+
+                try:
+                    # 🚀 Envia a mensagem ao webhook
+                    async with session.post(
+                        WEBHOOK_RECEIVE_MESSAGE,
+                        json={"message": data},
+                        timeout=15,
+                    ) as resp:
+                        try:
+                            # 📡 Tenta decodificar resposta JSON
+                            response_json = await resp.json(content_type=None)
+                            resposta_formatada = json.dumps(response_json, indent=2, ensure_ascii=False)
+
+                            print(f"📤 [WEBHOOK] Status {resp.status} | Resposta JSON:\n{resposta_formatada}")
+                            await websocket.send_text(
+                                f"✅ Resposta do webhook ({resp.status}): {resposta_formatada}"
+                            )
+
+                            # ⚙️ Envia resposta para tratamento e execução local
+                            await processar_resposta(response_json)
+
+                        except Exception:
+                            # Caso o retorno não seja JSON, envia texto cru
+                            response_text = await resp.text()
+                            print(f"📤 [WEBHOOK] Status {resp.status} | Texto:\n{response_text}")
+                            await websocket.send_text(
+                                f"✅ Resposta do webhook ({resp.status}): {response_text}"
+                            )
+
+                except asyncio.TimeoutError:
+                    print("⏰ [WEBHOOK] Timeout ao enviar mensagem.")
+                    await websocket.send_text("⚠️ O webhook demorou para responder.")
+                except Exception as e:
+                    print(f"⚠️ [WEBHOOK] Erro ao enviar: {e}")
+                    await websocket.send_text(f"⚠️ Erro ao enviar para o webhook: {e}")
+
+    except Exception as e:
+        print(f"⚠️ [VOICE] Erro ou desconexão: {e}")
+
+    finally:
+        await websocket.close()
+        print("🔌 [VOICE] Conexão encerrada.")
+
+
+# ======================================================
 # 🚀 Execução local
 # ======================================================
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8005)
+    uvicorn.run(app, host="0.0.0.0", port=8008)
