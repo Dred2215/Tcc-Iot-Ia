@@ -1,6 +1,6 @@
 ﻿import { FormEvent, useState, useRef, useEffect } from "react";
 import { z } from "zod";
-import { sendUserMessage } from "@/services/user_message_input";
+import { sendUserMessage } from "@/services/user_message_input_chat";
 
 interface Message {
   id: string;
@@ -24,62 +24,6 @@ interface ChatMessageProps {
 // 🔒 Endpoint fixo em localhost:8080 (ambiente de dev)
 const NOTIFY_ENDPOINT_DEV = "http://localhost:8000/notificar-mensagem-ia";
 
-
-const formatWebhookResponse = (data: unknown): string => {
-  if (!data) {
-    return "Sem resposta do servidor.";
-  }
-
-  if (typeof data === "object" && data !== null) {
-    const obj = data as { type?: string; content_message?: string; friendly_message?: string };
-
-    if (obj.type === "IOT" && obj.friendly_message) {
-      return obj.friendly_message;
-    }
-
-    if (obj.type === "general" && obj.content_message) {
-      return obj.content_message;
-    }
-  }
-
-  if (Array.isArray(data) && data.length > 0) {
-    const obj = data[0] as any;
-    if (obj.IOT_command && Array.isArray(obj.IOT_command)) {
-      const comandos = obj.IOT_command
-        .map((cmd: any, i: number) => {
-          return `Comando ${i + 1}:\n- Dispositivo: ${cmd.device ?? "?"}\n- Ação: ${cmd.action ?? "?"}\n- Parâmetro: ${cmd.parameter ?? "nenhum"}\n- Tempo: ${cmd.additional_condit ?? "0"} seg`;
-        })
-        .join("\n\n");
-      return `Para sua mensagem "IOT":\n${comandos}`;
-    }
-    if (obj.type_message === "general") {
-      return `Para sua mensagem "general" - ${obj.message ?? ""}`;
-    }
-  }
-
-  if (typeof data === "object") {
-    const maybeObj = data as { type?: string; content?: unknown };
-    if (maybeObj.type && maybeObj.content) {
-      if (maybeObj.type === "IOT" && Array.isArray(maybeObj.content)) {
-        const comandos = maybeObj.content
-          .map((cmd: any, i: number) => {
-            return `Comando ${i + 1}:\n- Dispositivo: ${cmd.device ?? "?"}\n- Ação: ${cmd.action ?? "?"}\n- Parâmetro: ${cmd.parameter ?? "nenhum"}\n- Tempo: ${cmd.additional_condit ?? "0"} seg`;
-          })
-          .join("\n\n");
-        return `Para sua mensagem "IOT":\n${comandos}`;
-      }
-      if (maybeObj.type === "general" && typeof maybeObj.content === "string") {
-        return `Para sua mensagem "general" - ${maybeObj.content}`;
-      }
-    }
-  }
-
-  try {
-    return JSON.stringify(data, null, 2);
-  } catch {
-    return "Resposta recebida do servidor.";
-  }
-};
 
 const ChatMessage = ({ message }: ChatMessageProps) => {
   const isUser = message.type === "user";
@@ -143,82 +87,66 @@ export const ChatInterface = () => {
       const { text } = messageSchema.parse({ text: inputValue });
       const trimmedText = text.trim();
 
+      // 💬 Adiciona mensagem do usuário no chat
       const userMessage: Message = {
         id: Date.now().toString(),
         text: trimmedText,
         type: "user",
         timestamp: new Date(),
       };
-
       setMessages((prev) => [...prev, userMessage]);
       setInputValue("");
       setIsLoading(true);
 
       try {
-        const webhookResponse = await sendUserMessage(trimmedText);
-        let aiMessageText = formatWebhookResponse(webhookResponse);
-        let command = null;
+        // 🚀 Envia comando para o n8n e recebe payload normalizado
+        const response = await sendUserMessage(trimmedText);
+        console.log("[DEBUG] Payload normalizado:", response);
 
-        if (
-          typeof webhookResponse === "object" &&
-          webhookResponse !== null &&
-          "type" in webhookResponse &&
-          "content_message" in webhookResponse &&
-          "friendly_message" in webhookResponse
-        ) {
-          const responseObj = webhookResponse as {
-            type: string;
-            content_message: any;
-            friendly_message: string;
-          };
-          aiMessageText = responseObj.friendly_message;
-          command = responseObj.content_message;
-        }
-
+        // 💬 Mostra resposta da IA no chat
         const aiMessage: Message = {
           id: (Date.now() + 1).toString(),
-          text: aiMessageText,
+          text: response.respostaIA || "Sem resposta da IA.",
           type: "ai",
           timestamp: new Date(),
         };
         setMessages((prev) => [...prev, aiMessage]);
 
-        if (command) {
-          console.log("[LOG] Command recebido:", command);
-        }
+        // 🧩 Monta payload completo para backend FastAPI
+        const backendPayload = {
+          user_message: response.comando,    // comando do usuário
+          mensagem: response.respostaIA,     // resposta da IA
+          comando: response.raw,             // estrutura bruta completa
+          tipo: response.device ? "IOT" : "general",
+          device: response.device,           // nome do dispositivo
+          action: response.action,           // ação executada
+        };
 
-        try {
-          const tipo = (webhookResponse as any)?.type ?? (command ? "IOT" : "general");
-          const comandoStr =
-            typeof command === "string" ? command : JSON.stringify(command ?? "");
-          await fetch(NOTIFY_ENDPOINT_DEV, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              mensagem: aiMessage.text,
-              comando: comandoStr,
-              tipo,
-            }),
-          });
-        } catch (notificacaoError) {
-          console.error("Erro ao notificar backend:", notificacaoError);
-          setError("Não foi possível notificar o backend. Tente novamente.");
-        }
-      } catch {
-        console.error("Failed to reach the automation service. Please try again.");
+        console.log("[DEBUG] Enviando para backend:", backendPayload);
+
+        // 🔗 Envia notificação ao backend
+        await fetch(NOTIFY_ENDPOINT_DEV, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(backendPayload),
+        });
+
+      } catch (notificacaoError) {
+        console.error("Erro ao processar mensagem:", notificacaoError);
+        setError("Não foi possível processar a mensagem. Tente novamente.");
       } finally {
         setIsLoading(false);
       }
+
     } catch (err) {
       if (err instanceof z.ZodError) {
         setError(err.issues[0].message);
       } else {
-        setError("Failed to send message. Please try again.");
+        setError("Falha ao enviar mensagem. Tente novamente.");
       }
     }
   };
+
 
   return (
     <div className="bg-gradient-card rounded-2xl shadow-card border border-border/50 h-96 flex flex-col">

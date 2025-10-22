@@ -103,11 +103,33 @@ class Portao:
 
     def acionar(self):
         print(f"🚪 Executando cena '{self.nome}'...")
-        res = self.openapi.post(f"/v1.0/homes/{self.home_id}/scenes/{self.scene_id}/trigger", {})
-        if res.get("success"):
-            print(f"✅ Cena '{self.nome}' executada com sucesso!")
-        else:
+
+        path = f"/v1.0/homes/{self.home_id}/scenes/{self.scene_id}/trigger"
+
+        try:
+            # Tentativa 1: corpo nulo (funciona na maioria dos casos)
+            res = self.openapi.post(path, None)
+            if res.get("success"):
+                print(f"✅ Cena '{self.nome}' executada com sucesso!")
+                return
+
+            # Tentativa 2: corpo vazio {} (fallback)
+            if res.get("code") == 1004:
+                print("⚠️  Erro 1004 (sign invalid). Tentando novamente com body={} ...")
+                res2 = self.openapi.post(path, {})
+                if res2.get("success"):
+                    print(f"✅ Cena '{self.nome}' executada com sucesso (fallback)!")
+                    return
+                else:
+                    print(f"❌ Falha ao acionar cena (fallback): {res2}")
+                    return
+
+            # Outro erro
             print(f"❌ Falha ao acionar '{self.nome}': {res}")
+
+        except Exception as e:
+            print(f"⚠️  Erro ao tentar acionar cena: {e}")
+
 
 # ======================================================
 # ⚙️ REGISTRO DE DISPOSITIVOS
@@ -174,6 +196,47 @@ async def testar_dispositivo(dispositivo):
         print("⚠️ Tipo de dispositivo não reconhecido.")
 
 # ======================================================
+# 🧾 LISTAR DISPOSITIVOS E CENAS COM ID
+# ======================================================
+def listar_dispositivos_e_cenas(openapi, home_id):
+    print("\n📡 Buscando dispositivos e cenas na sua conta Tuya Cloud...")
+
+    # --- Lista de dispositivos ---
+    try:
+        dispositivos_data = openapi.get(f"/v1.0/homes/{home_id}/devices")
+        if dispositivos_data.get("success"):
+            dispositivos = dispositivos_data.get("result", [])
+            print("\n💡 Dispositivos encontrados:")
+            for i, disp in enumerate(dispositivos, start=1):
+                nome = disp.get("name", "Sem nome")
+                dev_id = disp.get("id", "Desconhecido")
+                print(f"  {i}. {nome} (Device ID: {dev_id})")
+            print(f"✅ Total de dispositivos: {len(dispositivos)}")
+        else:
+            print(f"❌ Falha ao buscar dispositivos: {dispositivos_data}")
+    except Exception as e:
+        print(f"⚠️ Erro ao buscar dispositivos: {e}")
+
+    # --- Lista de cenas ---
+    try:
+        cenas_data = openapi.get(f"/v1.0/homes/{home_id}/scenes")
+        if cenas_data.get("success"):
+            cenas = cenas_data.get("result", [])
+            print("\n🎬 Cenas disponíveis:")
+            for i, cena in enumerate(cenas, start=1):
+                nome = cena.get("name", "Sem nome")
+                scene_id = cena.get("scene_id", "Desconhecido")
+                print(f"  {i}. 🎞️ {nome} (Scene ID: {scene_id})")
+            print(f"✅ Total de cenas: {len(cenas)}")
+        else:
+            print(f"❌ Falha ao buscar cenas: {cenas_data}")
+    except Exception as e:
+        print(f"⚠️ Erro ao buscar cenas: {e}")
+
+    print("\n📋 Fim da listagem geral.\n")
+
+
+# ======================================================
 # 🧠 EXECUÇÃO PRINCIPAL
 # ======================================================
 async def main():
@@ -181,6 +244,10 @@ async def main():
     print("📘 Endpoints disponíveis:")
     for nome, url in ENDPOINTS.items():
         print(f"  - {nome}: {url}")
+    print()
+
+    # 🆕 Mostrar todos os dispositivos e cenas logo no início
+    listar_dispositivos_e_cenas(openapi, home_id)
     print()
 
     while True:
@@ -192,6 +259,7 @@ async def main():
             break
 
     print("\n👋 Encerrando teste de dispositivos.")
+
 
 if __name__ == "__main__":
     try:

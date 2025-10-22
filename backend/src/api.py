@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 from typing import Any, Optional
-from fastapi import FastAPI, HTTPException, UploadFile, File, Response, Request
+from fastapi import FastAPI, HTTPException, UploadFile, File, Response, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
@@ -19,7 +19,7 @@ from tratamento_response_IA import processar_resposta, inicializar_dispositivos,
 
 N8N_LOGIN_URL = "https://nery-automa-n8n.dlivfa.easypanel.host/webhook/login_user_webhook"
 N8N_AUTH_CHECK_URL = "https://nery-automa-n8n.dlivfa.easypanel.host/webhook/auth_check_user"
-
+N8N_LOG_WEBHOOK = "https://nery-automa-n8n.dlivfa.easypanel.host/webhook/e50fda8a-c42f-48d8-87a8-94d9f62b382b"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -66,33 +66,82 @@ class MensagemRequest(BaseModel):
 
 # ✅ Endpoint de notificação
 @app.post("/notificar-mensagem-ia")
-async def notificar_mensagem_ia(req: MensagemRequest):
-    print(f"[MESSAGE] Corpo recebido: mensagem='{req.mensagem}', comando='{req.comando}', tipo='{req.tipo}'")
+async def notificar_mensagem_ia(
+    data: dict = Body(...)
+):
+    """
+    Recebe notificações do frontend contendo:
+    - user_message: comando do usuário
+    - mensagem: resposta da IA
+    - comando: estrutura bruta retornada pelo n8n
+    - tipo: tipo da mensagem (IOT ou general)
+    - device: nome do dispositivo
+    - action: ação executada
+    """
 
-    # Estrutura interna
-    class IA:
-        message = {
-            "message": req.mensagem,
-            "command": req.comando
+    # 🔍 Log completo do payload recebido
+    print("\n[📩 NOVA NOTIFICAÇÃO RECEBIDA]")
+    print(json.dumps(data, indent=2, ensure_ascii=False))
+
+    # Extrai campos principais
+    user_message = data.get("user_message")
+    mensagem = data.get("mensagem")
+    comando = data.get("comando")
+    tipo = data.get("tipo")
+    device = data.get("device")
+    action = data.get("action")
+
+    print(f"\n[INFO] Tipo: {tipo}")
+    print(f"[INFO] Usuário disse: {user_message}")
+    print(f"[INFO] Resposta da IA: {mensagem}")
+    print(f"[INFO] Dispositivo: {device}")
+    print(f"[INFO] Ação: {action}")
+
+    # Se houver comando bruto, tenta converter para objeto
+    comando_obj = comando
+    if isinstance(comando, str) and comando.strip().startswith(('{', '[')):
+        try:
+            comando_obj = json.loads(comando)
+        except json.JSONDecodeError:
+            print(f"[ERRO] JSON inválido em 'comando': {comando}")
+            raise HTTPException(status_code=400, detail="Comando JSON inválido")
+
+    # 🚀 Envia o payload completo para o webhook do n8n
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                N8N_LOG_WEBHOOK,
+                json={
+                    "user_message": user_message,
+                    "mensagem": mensagem,
+                    "tipo": tipo,
+                    "device": device,
+                    "action": action,
+                    "comando": comando_obj
+                }
+            )
+            print(f"[WEBHOOK N8N] Status: {response.status_code}")
+            print(f"[WEBHOOK N8N] Resposta: {response.text}")
+    except Exception as e:
+        print(f"[ERRO] Falha ao enviar para o webhook N8N: {e}")
+
+    # 🚦 Processa comando IoT localmente se aplicável
+    if tipo == "IOT" and comando_obj:
+        print(f"[AÇÃO] Enviando comando IoT para execução: {comando_obj}")
+        # asyncio.create_task(processar_resposta(comando_obj))
+        return {
+            "status": "IOT recebido e enviado ao n8n",
+            "device": device,
+            "action": action
         }
 
-    comando_obj = IA.message["command"]
-
-    # Se for string JSON, tenta decodificar
-    if isinstance(comando_obj, str) and comando_obj.strip().startswith(('[', '{')):
-        try:
-            comando_obj = json.loads(comando_obj)
-        except json.JSONDecodeError:
-            print(f"[ERRO] Falha ao decodificar o JSON do comando: {comando_obj}")
-            raise HTTPException(status_code=400, detail="Comando em formato JSON inválido.")
-
-    # Se for comando IoT → dispara processamento
-    if req.tipo == "IOT" and comando_obj:
-        print(f"[AÇÃO] Executando comando IOT: {comando_obj}")
-        asyncio.create_task(processar_resposta(comando_obj))
-        return {"status": "Comando IOT recebido e sendo processado em segundo plano."}
-
-    return {"status": "Notificação recebida", "data": IA.message}
+    return {
+        "status": "Mensagem registrada e enviada ao n8n",
+        "user_message": user_message,
+        "mensagem": mensagem,
+        "device": device,
+        "action": action
+    }
 
 
 # ✅ Endpoint para comandos de voz (texto final do WebSocket)
@@ -190,42 +239,6 @@ async def auth_check_user(request: Request):
         print(f"[ERRO AUTH_CHECK] {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
-
-@app.post("/record")
-async def record(audio: UploadFile = File(...)):
-    if not audio.filename:
-        raise HTTPException(status_code=400, detail="Nenhum arquivo de audio enviado.")
-
-    content_type = (audio.content_type or "").lower()
-    if not content_type.startswith("audio/"):
-        raise HTTPException(status_code=400, detail="Tipo de arquivo invalido. Envie um audio.")
-
-    base_path = Path(__file__).resolve().parent.parent
-    audio_dir = base_path / "audio"
-    audio_dir.mkdir(parents=True, exist_ok=True)
-
-    original_suffix = Path(audio.filename).suffix
-    extension = original_suffix if original_suffix else ".webm"
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
-    unique_id = uuid4().hex
-    filename = f"recording_{timestamp}_{unique_id}{extension}"
-    file_path = audio_dir / filename
-
-    data = await audio.read()
-    if not data:
-        raise HTTPException(status_code=400, detail="Arquivo de audio vazio.")
-
-    with file_path.open("wb") as buffer:
-        buffer.write(data)
-
-    print(f"[AUDIO] Arquivo salvo em {file_path}")
-
-    return {
-        "status": "ok",
-        "filename": filename,
-        "relative_path": f"audio/{filename}",
-    }
 
 
 

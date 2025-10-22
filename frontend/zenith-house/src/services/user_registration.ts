@@ -34,7 +34,7 @@ export interface RegisterUserResult {
   responsePayload: RegisterWebhookResponse;
 }
 
-const DEFAULT_WEBHOOK_URL = "https://nery-automa-n8n.dlivfa.easypanel.host/webhook-test/register-user";
+const DEFAULT_WEBHOOK_URL = "https://nery-automa-n8n.dlivfa.easypanel.host/webhook/register-user";
 
 const REGISTER_WEBHOOK_URL =
   (typeof import.meta !== "undefined" && (import.meta as any)?.env?.VITE_REGISTER_WEBHOOK_URL) ||
