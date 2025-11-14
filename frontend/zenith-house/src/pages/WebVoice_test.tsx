@@ -2,6 +2,75 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Mic, Square } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
+type WebhookPayload =
+  | {
+      type?: string;
+      friendly_message?: string;
+      content_message?:
+        | string
+        | {
+            friendly_message?: string;
+            message?: string;
+            text?: string;
+            status?: string;
+          };
+      IOT_message?: string;
+      message?: string;
+    }
+  | string;
+
+const extractWebhookMessage = (payload: WebhookPayload): string => {
+  if (!payload) return "";
+  if (typeof payload === "string") return payload;
+
+  const fromContent = payload.content_message;
+  if (fromContent) {
+    if (typeof fromContent === "string") return fromContent;
+    if (typeof fromContent === "object") {
+      if (typeof fromContent.friendly_message === "string") return fromContent.friendly_message;
+      if (typeof fromContent.message === "string") return fromContent.message;
+      if (typeof fromContent.text === "string") return fromContent.text;
+      if (typeof fromContent.status === "string") return fromContent.status;
+    }
+  }
+
+  if (typeof payload.friendly_message === "string") return payload.friendly_message;
+  if (typeof payload.IOT_message === "string") return payload.IOT_message;
+  if (typeof payload.message === "string") return payload.message;
+
+  return "";
+};
+
+const safeJsonParse = (text: string): WebhookPayload | null => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+};
+
+const formatVoiceServerMessage = (raw: string): string => {
+  if (!raw) return "";
+
+  const trimmed = raw.trim();
+  const direct = safeJsonParse(trimmed);
+  if (direct) {
+    const msg = extractWebhookMessage(direct);
+    if (msg) return msg;
+  }
+
+  const jsonMatch = trimmed.match(/\{.*\}$/s);
+  if (jsonMatch) {
+    const parsedTail = safeJsonParse(jsonMatch[0]);
+    if (parsedTail) {
+      const msg = extractWebhookMessage(parsedTail);
+      if (msg) return msg;
+    }
+  }
+
+  return trimmed;
+};
+
 const Voice_STT_Test = () => {
   const navigate = useNavigate();
 
@@ -180,9 +249,10 @@ const Voice_STT_Test = () => {
       setStatusMessage("📨 Comando enviado ao servidor.");
     };
 
-    ws.onmessage = (e) => {
+    ws.onmessage = (e: MessageEvent<string>) => {
       console.log("🤖 [SERVER VOICE]", e.data);
-      setStatusMessage(e.data);
+      const formatted = formatVoiceServerMessage(e.data);
+      setStatusMessage(formatted || e.data);
     };
 
     ws.onclose = () => {

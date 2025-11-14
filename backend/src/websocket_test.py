@@ -7,15 +7,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import uvicorn
 from tratamento_response_IA import inicializar_dispositivos, processar_resposta
+from starlette.websockets import WebSocketState
 
 # ======================================================
 # 🌍 Carrega variáveis de ambiente
 # ======================================================
 load_dotenv()
-WEBHOOK_RECEIVE_MESSAGE = os.getenv("WEBHOOK_RECIVE_MESSAGE")
+WEBHOOK_RECEIVE_MESSAGE = (
+    os.getenv("VITE_WEBHOOK_MESSAGE_CHAT_RESPONSE")
+    or os.getenv("WEBHOOK_MESSAGE_CHAT_RESPONSE")
+    or os.getenv("WEBHOOK_RECIVE_MESSAGE")
+)
 
 if not WEBHOOK_RECEIVE_MESSAGE:
-    print("⚠️ Aviso: Variável WEBHOOK_RECIVE_MESSAGE não encontrada no .env.")
+    print("⚠️ Aviso: Nenhuma variável de webhook (VITE_WEBHOOK_MESSAGE_CHAT_RESPONSE / WEBHOOK_MESSAGE_CHAT_RESPONSE / WEBHOOK_RECIVE_MESSAGE) foi encontrada no .env.")
 
 app = FastAPI()
 
@@ -61,7 +66,8 @@ async def websocket_hotword(websocket: WebSocket):
         print(f"⚠️ [HOTWORD] Erro ou desconexão: {e}")
 
     finally:
-        await websocket.close()
+        if websocket.application_state != WebSocketState.DISCONNECTED:
+            await websocket.close()
         print("🔌 [HOTWORD] Conexão encerrada.")
 
 
@@ -108,7 +114,12 @@ async def websocket_voice(websocket: WebSocket):
                             )
 
                             # ⚙️ Envia resposta para tratamento e execução local
-                            await processar_resposta(response_json)
+                            feedbacks = await processar_resposta(response_json)
+                            if feedbacks:
+                                for feedback in feedbacks:
+                                    mensagem = feedback.get("message")
+                                    if mensagem:
+                                        await websocket.send_text(mensagem)
 
                         except Exception:
                             # Caso o retorno não seja JSON, envia texto cru
@@ -129,7 +140,8 @@ async def websocket_voice(websocket: WebSocket):
         print(f"⚠️ [VOICE] Erro ou desconexão: {e}")
 
     finally:
-        await websocket.close()
+        if websocket.application_state != WebSocketState.DISCONNECTED:
+            await websocket.close()
         print("🔌 [VOICE] Conexão encerrada.")
 
 

@@ -128,11 +128,12 @@ async def notificar_mensagem_ia(
     # 🚦 Processa comando IoT localmente se aplicável
     if tipo == "IOT" and comando_obj:
         print(f"[AÇÃO] Enviando comando IoT para execução: {comando_obj}")
-        # asyncio.create_task(processar_resposta(comando_obj))
+        iot_feedback = await processar_resposta(comando_obj)
         return {
             "status": "IOT recebido e enviado ao n8n",
             "device": device,
-            "action": action
+            "action": action,
+            "iot_feedback": iot_feedback or []
         }
 
     return {
@@ -140,7 +141,8 @@ async def notificar_mensagem_ia(
         "user_message": user_message,
         "mensagem": mensagem,
         "device": device,
-        "action": action
+        "action": action,
+        "iot_feedback": []
     }
 
 

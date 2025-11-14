@@ -1,4 +1,6 @@
 import asyncio
+from typing import Any, Optional
+
 from dispositivos import Lampada, Portao, SensorPortao
 from config_tuya import openapi, home_id
 
@@ -40,11 +42,34 @@ CORES_TUYA = {
     "preto":      {"h": 0,   "s": 0,    "v": 0}
 }
 
+def formatar_feedback(device_label: str, device_key: str, action: str, resultado: Any) -> Optional[str]:
+    nome = device_label or device_key or "dispositivo"
+
+    if device_key == "sensor_portao" and action in {"verificar_estado", "estado_portao"}:
+        if isinstance(resultado, bool):
+            return f"O portão está {'aberto' if resultado else 'fechado'}."
+        if resultado is None:
+            return "Não foi possível determinar o estado do portão."
+
+    if isinstance(resultado, bool):
+        return f"{nome}: {'ativado' if resultado else 'desativado'}."
+    if isinstance(resultado, (int, float, str)):
+        return f"{nome}: {resultado}"
+    if isinstance(resultado, dict):
+        return f"{nome}: {resultado}"
+    if isinstance(resultado, list) and resultado:
+        return f"{nome}: {resultado}"
+    return None
+
+
 async def executar_comando(idx, cmd):
-    device = (cmd.get("device") or "").lower()
+    device_label = (cmd.get("device") or "").strip()
+    device = device_label.lower()
     action = (cmd.get("action") or "").lower()
+    action_original = action
     parameter = cmd.get("parameter")
     additional_raw = cmd.get("additional_condit")
+    feedback: Optional[str] = None
 
     # Normaliza additional_condit
     additional = None
@@ -72,8 +97,9 @@ async def executar_comando(idx, cmd):
         alvo_tipo = "cena"
 
     if alvo is None:
-        print(f"[ERRO] '{device}' não encontrado nem em DISPOSITIVOS nem em CENAS.")
-        return
+        msg = f"'{device_label or device}' não está configurado."
+        print(f"[ERRO] {msg}")
+        return {"device": device_label or device, "action": action_original, "message": msg}
 
     # Delay opcional (não bloqueante)
     if isinstance(additional, int) and additional > 0:
@@ -91,12 +117,17 @@ async def executar_comando(idx, cmd):
         if isinstance(res, dict) and "result" in res:
             for item in res["result"]:
                 if item["code"] == parameter:
-                    print(f"✅ {device} → {parameter}: {item['value']}")
-                    return
-            print(f"⚠️ Parâmetro '{parameter}' não encontrado no status de '{device}'.")
+                    valor = item["value"]
+                    msg = f"{device_label or device} → {parameter}: {valor}"
+                    print(f"✅ {msg}")
+                    return {"device": device_label or device, "action": action_original, "message": msg}
+            msg = f"⚠️ Parâmetro '{parameter}' não encontrado no status de '{device_label or device}'."
+            print(msg)
+            return {"device": device_label or device, "action": action_original, "message": msg}
         else:
-            print(f"❌ Erro: status de '{device}' não retornou um dicionário esperado.")
-        return
+            msg = f"❌ Status de '{device_label or device}' não retornou o formato esperado."
+            print(msg)
+            return {"device": device_label or device, "action": action_original, "message": msg}
 
     # Executa ação
     if hasattr(alvo, action):
@@ -107,13 +138,16 @@ async def executar_comando(idx, cmd):
                 metodo(h, s, v)
             elif parameter is not None and parameter != "":
                 metodo(int(parameter))
+                feedback = f"Ação '{action_original}' executada em '{device_label or device}'."
             else:
                 resultado = metodo()
                 if resultado is not None:
                     print(f"📊 Resultado: {resultado}")
+                    feedback = formatar_feedback(device_label or device, device, action_original, resultado)
             print(f"[OK] {action} executado em {alvo_tipo} '{device}'.")
         except TypeError as e:
             print(f"[ERRO] Falha ao executar {action} em {device}: {e}")
+            feedback = f"Erro ao executar '{action_original}' em '{device_label or device}': {e}"
     else:
         # Fallback
         for fallback in ("executar", "acionar", "play", "run"):
@@ -121,11 +155,20 @@ async def executar_comando(idx, cmd):
                 try:
                     getattr(alvo, fallback)()
                     print(f"[OK] {fallback} executado em {alvo_tipo} '{device}' (fallback).")
+                    feedback = f"Ação '{fallback}' executada em '{device_label or device}'."
                     break
                 except Exception as e:
                     print(f"[ERRO] Falha no fallback '{fallback}' para '{device}': {e}")
+                    feedback = f"Erro ao executar fallback '{fallback}' em '{device_label or device}': {e}"
         else:
             print(f"[ERRO] Ação '{action}' não encontrada para {alvo_tipo} '{device}'.")
+            feedback = f"Ação '{action_original}' não encontrada para '{device_label or device}'."
+
+    return {
+        "device": device_label or device,
+        "action": action_original,
+        "message": feedback,
+    }
 
 
 
@@ -152,15 +195,17 @@ async def processar_resposta(respostaIA):
 
     else:
         print("❌ Nenhuma resposta válida da IA.")
-        return
+        return []
 
     if not iot_cmds:
         print("⚠️ Nenhuma ação encontrada.")
-        return
+        return []
 
     # 🚀 Executa todos os comandos em paralelo
     tarefas = [executar_comando(idx, cmd) for idx, cmd in enumerate(iot_cmds, start=1)]
-    await asyncio.gather(*tarefas)
+    resultados = await asyncio.gather(*tarefas)
+    feedbacks = [resultado for resultado in resultados if resultado and resultado.get("message")]
+    return feedbacks or []
 
 
 

@@ -6,10 +6,26 @@ export interface WebhookResponseNormalized {
   raw?: any;
 }
 
-const WEBHOOK_URL = "https://nery-automa-n8n.dlivfa.easypanel.host/webhook/test-message";
+const WEBHOOK_URL = import.meta.env.VITE_WEBHOOK_MESSAGE_CHAT_RESPONSE || "";
+
+const getContentMessageText = (content: unknown): string | null => {
+  if (!content) return null;
+  if (typeof content === "string") return content;
+  if (typeof content === "object") {
+    const { message, friendly_message, text } = content as Record<string, unknown>;
+    if (typeof message === "string") return message;
+    if (typeof friendly_message === "string") return friendly_message;
+    if (typeof text === "string") return text;
+  }
+  return null;
+};
 
 export async function sendUserMessage(message: string): Promise<WebhookResponseNormalized> {
   try {
+    if (!WEBHOOK_URL) {
+      throw new Error("Endpoint do webhook não configurado. Verifique VITE_WEBHOOK_MESSAGE_CHAT_RESPONSE.");
+    }
+
     const res = await fetch(WEBHOOK_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -20,7 +36,20 @@ export async function sendUserMessage(message: string): Promise<WebhookResponseN
       throw new Error(`Erro na requisição: ${res.statusText}`);
     }
 
-    const data = await res.json();
+    const rawText = await res.text();
+    let data: any = {};
+
+    if (rawText.trim().length === 0) {
+      console.warn("[DEBUG] Webhook retornou resposta vazia.");
+    } else {
+      try {
+        data = JSON.parse(rawText);
+      } catch (jsonError) {
+        console.error("Erro ao converter resposta em JSON:", jsonError);
+        throw new Error("Resposta inválida do servidor.");
+      }
+    }
+
     console.log("[DEBUG] Resposta bruta da IA:", data);
 
     let respostaIA = "";
@@ -30,12 +59,13 @@ export async function sendUserMessage(message: string): Promise<WebhookResponseN
     // 🚀 Trata o formato que vem como array
     if (Array.isArray(data) && data.length > 0) {
       const obj = data[0];
-      respostaIA = obj.IOT_message || obj.friendly_message || "Comando processado.";
+      const contentText = getContentMessageText(obj.content_message);
+      respostaIA = contentText || obj.IOT_message || obj.friendly_message || "Comando processado.";
 
       // 📦 Se o retorno usa content_message
       if (obj.content_message) {
-        device = obj.content_message.device || null;
-        action = obj.content_message.action || null;
+        device = (obj.content_message as any).device || null;
+        action = (obj.content_message as any).action || null;
       }
 
       // 📦 Ou, se usa IOT_command (outro formato possível)
@@ -48,7 +78,8 @@ export async function sendUserMessage(message: string): Promise<WebhookResponseN
 
     // 🚀 Trata formato de objeto direto
     else if (typeof data === "object" && data !== null) {
-      respostaIA = (data as any).IOT_message || (data as any).friendly_message || "Comando processado.";
+      const contentText = getContentMessageText((data as any).content_message);
+      respostaIA = contentText || (data as any).IOT_message || (data as any).friendly_message || "Comando processado.";
 
       if ((data as any).content_message) {
         device = (data as any).content_message.device || null;
