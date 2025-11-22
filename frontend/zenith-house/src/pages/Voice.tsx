@@ -3,6 +3,18 @@ import { useEffect, useState, useRef } from "react";
 import { ArrowLeft, Mic, Square } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
+const resolveWsBase = () => {
+  const envBase = (import.meta.env.VITE_VOICE_WS_BASE as string | undefined)?.trim();
+  if (envBase) return envBase.replace(/\/$/, "");
+
+  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  const host = window.location.hostname;
+  const port = (import.meta.env.VITE_VOICE_WS_PORT as string | undefined)?.trim() || "8008";
+  return `${protocol}://${host}${port ? `:${port}` : ""}`;
+};
+
+const buildWsUrl = (path: string) => `${resolveWsBase()}${path}`;
+
 const Voice = () => {
   const navigate = useNavigate();
 
@@ -19,9 +31,7 @@ const Voice = () => {
   // =====================================================
   const connectHotwordWebSocket = () => {
     try {
-      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-      const host = window.location.hostname;
-      const ws = new WebSocket(`${protocol}://${host}:8005/ws-hotword`);
+      const ws = new WebSocket(buildWsUrl("/ws-hotword"));
 
       ws.onopen = () => {
         console.log("👂 [HOTWORD] Conectado.");
@@ -67,9 +77,7 @@ const Voice = () => {
   const connectVoiceWebSocket = async (): Promise<void> => {
     try {
       setIsLoading(true);
-      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-      const host = window.location.hostname;
-      const ws = new WebSocket(`${protocol}://${host}:8005/ws-voice`);
+      const ws = new WebSocket(buildWsUrl("/ws-voice"));
 
       ws.onopen = () => {
         console.log("🎧 [VOICE] Conectado.");

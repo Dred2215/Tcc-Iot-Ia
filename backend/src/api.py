@@ -10,16 +10,20 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Response, Request,
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
 
 
 
 # 👉 Import ajustado (usa src.)
+BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / ".env")
+
 from tratamento_response_IA import processar_resposta, inicializar_dispositivos, DISPOSITIVOS
 
 
-N8N_LOGIN_URL = "https://nery-automa-n8n.dlivfa.easypanel.host/webhook/login_user_webhook"
-N8N_AUTH_CHECK_URL = "https://nery-automa-n8n.dlivfa.easypanel.host/webhook/auth_check_user"
-N8N_LOG_WEBHOOK = "https://nery-automa-n8n.dlivfa.easypanel.host/webhook/e50fda8a-c42f-48d8-87a8-94d9f62b382b"
+N8N_LOGIN_URL = os.getenv("N8N_LOGIN_URL")
+N8N_AUTH_CHECK_URL = os.getenv("N8N_AUTH_CHECK_URL")
+N8N_LOG_WEBHOOK = os.getenv("N8N_LOG_WEBHOOK")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

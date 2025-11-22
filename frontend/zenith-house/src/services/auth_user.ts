@@ -8,8 +8,13 @@ export interface AuthCheckResponse {
   data?: any; // para capturar retorno do backend
 }
 
+const BACKEND_BASE_URL = (
+  (import.meta.env.VITE_BACKEND_BASE_URL as string | undefined)?.trim() ||
+  "http://localhost:8000"
+).replace(/\/$/, "");
+
 // Novo endpoint local do backend FastAPI
-const AUTH_CHECK_URL = "http://localhost:8000/auth_check_user";
+const AUTH_CHECK_URL = `${BACKEND_BASE_URL}/auth_check_user`;
 
 export async function checkAuth(): Promise<AuthCheckResponse> {
   try {

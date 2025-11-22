@@ -1,7 +1,4 @@
 
-# dispositivos_base.py
-from config_tuya import openapi
-
 class DispositivoBase:
     def __init__(self, nome, device_id, openapi):
         self.nome = nome
@@ -12,7 +9,7 @@ class DispositivoBase:
     def _executar(self, code, value):
         """Envia comando genérico para o dispositivo"""
         commands = {"commands": [{"code": code, "value": value}]}
-        openapi.post(f'/v1.0/iot-03/devices/{self.device_id}/commands', commands)
+        self.openapi.post(f'/v1.0/iot-03/devices/{self.device_id}/commands', commands)
 
     def status(self):
         """Obtém status do dispositivo"""

@@ -1,20 +1,23 @@
 import sys
+import os
 import asyncio
-from tuya_connector import TuyaOpenAPI
 
-# ======================================================
-# 🔐 CONFIGURAÇÃO TUYA CLOUD
-# ======================================================
-ACCESS_ID = "4jgyc5ex3wagcdt5eycs"
-ACCESS_SECRET = "fc51f69c94704a548ebb5537809ea9a0"
-ENDPOINT = "https://openapi.tuyaus.com"
-UID = "az1636816675981dWC2h"
-home_id = "54688414"
+from config_tuya import get_home_id, get_openapi
 
-print("🌐 Conectando à API Tuya Cloud...")
-openapi = TuyaOpenAPI(ENDPOINT, ACCESS_ID, ACCESS_SECRET)
-openapi.connect()
-print("✅ Conexão estabelecida com sucesso.\n")
+
+def _require_env(key: str) -> str:
+    value = os.getenv(key)
+    if not value:
+        raise RuntimeError(f"Defina a variável de ambiente {key} para executar os testes.")
+    return value
+
+
+home_id = get_home_id()
+openapi = get_openapi()
+
+LAMPADA_DEVICE_ID = _require_env("TUYA_LAMPADA_DEVICE_ID")
+SENSOR_PORTAO_DEVICE_ID = _require_env("TUYA_SENSOR_PORTAO_DEVICE_ID")
+PORTAO_SCENE_ID = _require_env("TUYA_PORTAO_SCENE_ID")
 
 # ======================================================
 # 📘 ENDPOINTS DE REFERÊNCIA (documentação)
@@ -135,12 +138,12 @@ class Portao:
 # ⚙️ REGISTRO DE DISPOSITIVOS
 # ======================================================
 DISPOSITIVOS = {
-    "lampada": Lampada("Luz", "eb20e4ad6247150831lufg", openapi),
-    "sensor_portao": SensorPortao("Sensor Portão", "eba6dbc576c6cb89d0ndap", openapi)
+    "lampada": Lampada("Luz", LAMPADA_DEVICE_ID, openapi),
+    "sensor_portao": SensorPortao("Sensor Portão", SENSOR_PORTAO_DEVICE_ID, openapi)
 }
 
 CENAS = {
-    "portao": Portao("Portão Garagem", openapi, home_id, "yp6IXiAOst5s66wX")
+    "portao": Portao("Portão Garagem", openapi, home_id, PORTAO_SCENE_ID)
 }
 
 # ======================================================

@@ -8,14 +8,14 @@ export interface LoginResponse {
   };
 }
 
-
-
-const LOGIN_WEBHOOK_URL = import.meta.env.VITE_LOGIN_WEBHOOK_URL;
-
+const BACKEND_BASE_URL = (
+  (import.meta.env.VITE_BACKEND_BASE_URL as string | undefined)?.trim() ||
+  "http://localhost:8000"
+).replace(/\/$/, "");
 
 export async function loginUser(email: string, password: string): Promise<LoginResponse> {
   try {
-    const response = await fetch("http://localhost:8000/login_user", {
+    const response = await fetch(`${BACKEND_BASE_URL}/login_user`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include", // ⚠️ envia e recebe cookies automaticamente

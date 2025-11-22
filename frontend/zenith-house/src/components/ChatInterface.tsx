@@ -21,8 +21,13 @@ interface ChatMessageProps {
   message: Message;
 }
 
-// 🔒 Endpoint fixo em localhost:8080 (ambiente de dev)
-const NOTIFY_ENDPOINT_DEV = "http://localhost:8000/notificar-mensagem-ia";
+// 🔗 Endpoint do backend configurável via VITE_BACKEND_BASE_URL
+const BACKEND_BASE_URL = (
+  (import.meta.env.VITE_BACKEND_BASE_URL as string | undefined)?.trim() ||
+  (typeof window !== "undefined" ? window.location.origin : "http://localhost:8000")
+).replace(/\/$/, "");
+
+const NOTIFY_ENDPOINT = `${BACKEND_BASE_URL}/notificar-mensagem-ia`;
 
 
 const ChatMessage = ({ message }: ChatMessageProps) => {
@@ -125,7 +130,7 @@ export const ChatInterface = () => {
         console.log("[DEBUG] Enviando para backend:", backendPayload);
 
         // 🔗 Envia notificação ao backend
-        const backendResponse = await fetch(NOTIFY_ENDPOINT_DEV, {
+        const backendResponse = await fetch(NOTIFY_ENDPOINT, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(backendPayload),

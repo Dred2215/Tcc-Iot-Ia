@@ -2,7 +2,7 @@ import asyncio
 from typing import Any, Optional
 
 from dispositivos import Lampada, Portao, SensorPortao
-from config_tuya import openapi, home_id
+from config_tuya import get_home_id, get_openapi
 
 # Containers vazios (serão preenchidos na inicialização)
 DISPOSITIVOS = {}
@@ -11,6 +11,9 @@ CENAS = {}
 def inicializar_dispositivos():
     global DISPOSITIVOS, CENAS
     print("🔄 Inicializando dispositivos...")
+
+    openapi = get_openapi()
+    home_id = get_home_id()
 
     DISPOSITIVOS = {
         "lampada": Lampada("Luz", "eb20e4ad6247150831lufg", openapi),

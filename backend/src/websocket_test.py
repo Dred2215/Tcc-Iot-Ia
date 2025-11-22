@@ -2,6 +2,7 @@ import os
 import asyncio
 import json
 import aiohttp
+from pathlib import Path
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -12,7 +13,8 @@ from starlette.websockets import WebSocketState
 # ======================================================
 # 🌍 Carrega variáveis de ambiente
 # ======================================================
-load_dotenv()
+BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / ".env")
 WEBHOOK_RECEIVE_MESSAGE = (
     os.getenv("VITE_WEBHOOK_MESSAGE_CHAT_RESPONSE")
     or os.getenv("WEBHOOK_MESSAGE_CHAT_RESPONSE")
