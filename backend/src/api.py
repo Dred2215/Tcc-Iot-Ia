@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
+from urllib.parse import urlsplit
 
 
 
@@ -24,6 +25,78 @@ from tratamento_response_IA import processar_resposta, inicializar_dispositivos,
 N8N_LOGIN_URL = os.getenv("N8N_LOGIN_URL")
 N8N_AUTH_CHECK_URL = os.getenv("N8N_AUTH_CHECK_URL")
 N8N_LOG_WEBHOOK = os.getenv("N8N_LOG_WEBHOOK")
+
+FRONTEND_URL = os.getenv("FRONTEND_URL")
+FRONTEND_HOMOLOG_URL = os.getenv(
+    "FRONTEND_HOMOLOG_URL",
+    "https://tcc-iot-frontend-homolog.dlivfa.easypanel.host",
+)
+FRONTEND_HOMOLOG_HTTP_URL = os.getenv(
+    "FRONTEND_HOMOLOG_HTTP_URL",
+    "http://tcc-iot-frontend-homolog.dlivfa.easypanel.host",
+)
+FRONTEND_LOCAL_URL = os.getenv("FRONTEND_LOCAL_URL", "http://localhost:8080")
+FRONTEND_ALT_LOCAL_URL = os.getenv("FRONTEND_ALT_LOCAL_URL", "http://localhost:5173")
+BACKEND_LOCAL_URL = os.getenv("BACKEND_LOCAL_URL", "http://localhost:8000")
+BACKEND_BASE_URL = os.getenv(
+    "BACKEND_BASE_URL", os.getenv("BACKEND_URL", "http://localhost:8000")
+)
+SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE")
+
+
+def _parse_bool_env(value: Optional[str]) -> Optional[bool]:
+    if value is None:
+        return None
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _sanitize_origin(origin: Optional[str]) -> Optional[str]:
+    if not origin:
+        return None
+    parsed = urlsplit(origin.strip())
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _split_extra_origins(raw: Optional[str]) -> list[str]:
+    if not raw:
+        return []
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _build_allowed_origins() -> list[str]:
+    raw_origins = [
+        FRONTEND_URL,
+        FRONTEND_HOMOLOG_URL,
+        FRONTEND_HOMOLOG_HTTP_URL,
+        FRONTEND_LOCAL_URL,
+        FRONTEND_ALT_LOCAL_URL,
+        BACKEND_LOCAL_URL,
+        *_split_extra_origins(os.getenv("CORS_EXTRA_ORIGINS")),
+    ]
+
+    allowed: list[str] = []
+    seen = set()
+
+    for origin in raw_origins:
+        sanitized = _sanitize_origin(origin)
+        if sanitized and sanitized not in seen:
+            allowed.append(sanitized)
+            seen.add(sanitized)
+
+    return allowed or ["http://localhost:8080"]
+
+
+def _should_use_secure_cookie(request: Request) -> bool:
+    flag = _parse_bool_env(SESSION_COOKIE_SECURE)
+    if flag is not None:
+        return flag
+
+    if BACKEND_BASE_URL.startswith("https://"):
+        return True
+
+    return request.url.scheme == "https"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -43,16 +116,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# 🔒 CORS fixo: apenas o frontend homolog pode acessar
-origins = [
-    "https://tcc-iot-frontend-homolog.dlivfa.easypanel.host",
-    "http://tcc-iot-frontend-homolog.dlivfa.easypanel.host",
-    "http://localhost:8000/record",
-    "http://localhost:8080",
-    "http://localhost:8080/text",
-    "http://localhost:8080/notificar-mensagem-ia",
-    "http://localhost:8000/login_user"
-]
+# 🔒 CORS autorizado apenas para domínios homologados/local
+origins = _build_allowed_origins()
 
 app.add_middleware(
     CORSMiddleware,
@@ -210,7 +275,7 @@ async def login_user(request: Request, response: Response, data: LoginRequest):
             key="session_id",
             value=session_id,
             httponly=True,
-            secure=False,  # alterar para True em produção
+            secure=_should_use_secure_cookie(request),
             samesite="lax",
             max_age=3600
         )

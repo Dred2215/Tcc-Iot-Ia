@@ -71,6 +71,18 @@ const formatVoiceServerMessage = (raw: string): string => {
   return trimmed;
 };
 
+const resolveWsBase = () => {
+  const envBase = (import.meta.env.VITE_VOICE_WS_BASE as string | undefined)?.trim();
+  if (envBase) return envBase.replace(/\/$/, "");
+
+  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  const host = window.location.hostname;
+  const port = (import.meta.env.VITE_VOICE_WS_PORT as string | undefined)?.trim() || "8008";
+  return `${protocol}://${host}${port ? `:${port}` : ""}`;
+};
+
+const buildWsUrl = (path: string) => `${resolveWsBase()}${path}`;
+
 const Voice_STT_Test = () => {
   const navigate = useNavigate();
 
@@ -205,9 +217,7 @@ const Voice_STT_Test = () => {
   // 🔌 WebSocket Único
   // =====================================================
   const connectSocket = () => {
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const host = window.location.hostname;
-    const ws = new WebSocket(`${protocol}://${host}:8008/ws-hotword`);
+    const ws = new WebSocket(buildWsUrl("/ws-hotword"));
 
     ws.onopen = () => {
       console.log("👂 [HOTWORD] Conectado ao servidor");
@@ -238,9 +248,7 @@ const Voice_STT_Test = () => {
   // 🔌 WebSocket de Comando (VOICE)
   // =====================================================
   const sendVoiceCommand = (text: string) => {
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const host = window.location.hostname;
-    const ws = new WebSocket(`${protocol}://${host}:8008/ws-voice`);
+    const ws = new WebSocket(buildWsUrl("/ws-voice"));
 
     ws.onopen = () => {
       console.log("🎤 [VOICE] Conectado ao servidor.");
