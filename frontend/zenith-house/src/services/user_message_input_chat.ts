@@ -6,7 +6,7 @@ export interface WebhookResponseNormalized {
   raw?: any;
 }
 
-const WEBHOOK_URL = import.meta.env.VITE_WEBHOOK_MESSAGE_CHAT_RESPONSE || "";
+const WEBHOOK_URL = (import.meta.env.VITE_WEBHOOK_MESSAGE_CHAT_RESPONSE as string | undefined)?.trim() || "";
 
 const getContentMessageText = (content: unknown): string | null => {
   if (!content) return null;
