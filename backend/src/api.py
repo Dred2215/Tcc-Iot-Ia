@@ -7,6 +7,8 @@ from fastapi import FastAPI, HTTPException, Response, Request, Body  # core do F
 from fastapi.middleware.cors import CORSMiddleware  # middleware para liberar CORS
 from pydantic import BaseModel  # criação de DTOs de request/response pydantic
 from contextlib import asynccontextmanager  # gerencia o ciclo de vida (startup/shutdown)
+from typing import Optional  # importa o tipo Optional para permitir tipar campos opcionais sem erro
+
 
 # ==========================
 # 🗂️ Carregar variáveis do .env
