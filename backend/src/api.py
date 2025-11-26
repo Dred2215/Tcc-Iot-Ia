@@ -4,6 +4,7 @@ import os
 import httpx
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 from uuid import uuid4
 from typing import Any, Optional
 from fastapi import FastAPI, HTTPException, UploadFile, File, Response, Request, Body
@@ -19,6 +20,34 @@ BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 
 from .tratamento_response_IA import processar_resposta, inicializar_dispositivos, DISPOSITIVOS
+
+
+def _origin_from_url(value: str) -> Optional[str]:
+    """Normaliza URLs em formato origin (sem path)."""
+    if not value:
+        return None
+    parsed = urlparse(value.strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def collect_env_origins() -> list[str]:
+    """Varre todas as variáveis de ambiente e coleta URLs para liberar no CORS."""
+    origins: set[str] = set()
+    for env_value in os.environ.values():
+        if not isinstance(env_value, str) or not env_value:
+            continue
+        fragments: list[str] = []
+        for chunk in env_value.split(","):
+            fragments.extend(chunk.split())
+        if not fragments:
+            fragments = [env_value]
+        for fragment in fragments:
+            origin = _origin_from_url(fragment)
+            if origin:
+                origins.add(origin)
+    return sorted(origins)
 
 
 N8N_LOGIN_URL = os.getenv("N8N_LOGIN_URL")
@@ -43,18 +72,20 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# 🔒 CORS fixo: apenas o frontend homolog pode acessar
-origins = [
-    "https://tcc-iot-backend-homolog.dlivfa.easypanel.host/login_user",
+# 🔒 CORS fixo + URLs detectadas no .env
+STATIC_ALLOWED_ORIGINS = [
     "https://tcc-iot-backend-homolog.dlivfa.easypanel.host",
     "https://tcc-iot-frontend-homolog.dlivfa.easypanel.host",
     "http://tcc-iot-frontend-homolog.dlivfa.easypanel.host",
-    "http://localhost:8000/record",
+    "http://localhost:8000",
     "http://localhost:8080",
-    "http://localhost:8080/text",
-    "http://localhost:8080/notificar-mensagem-ia",
-    "http://localhost:8000/login_user"
 ]
+
+ENV_ALLOWED_ORIGINS = collect_env_origins()
+if ENV_ALLOWED_ORIGINS:
+    print(f"[CORS] Origens detectadas no .env: {ENV_ALLOWED_ORIGINS}")
+
+origins = sorted({*STATIC_ALLOWED_ORIGINS, *ENV_ALLOWED_ORIGINS})
 
 app.add_middleware(
     CORSMiddleware,
