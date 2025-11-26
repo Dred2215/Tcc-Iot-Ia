@@ -34,19 +34,10 @@ export interface RegisterUserResult {
   responsePayload: RegisterWebhookResponse;
 }
 
-<<<<<<< HEAD
-const DEFAULT_WEBHOOK_URL = "https://tcc-iot-n8n.dlivfa.easypanel.host/webhook/register-user";
-const envRegisterWebhook =
-  typeof import.meta !== "undefined"
-    ? ((import.meta as any)?.env?.VITE_REGISTER_WEBHOOK_URL as string | undefined)
-    : undefined;
-const REGISTER_WEBHOOK_URL = (envRegisterWebhook?.trim() || DEFAULT_WEBHOOK_URL).replace(/\/$/, "");
-=======
 const DEFAULT_REGISTER_WEBHOOK_URL = "https://tcc-iot-n8n.dlivfa.easypanel.host/webhook/register-user";
 
 const REGISTER_WEBHOOK_URL =
   (import.meta.env.VITE_REGISTER_WEBHOOK_URL as string | undefined)?.trim() || DEFAULT_REGISTER_WEBHOOK_URL;
->>>>>>> origin/main
 
 export const buildRegisterPayload = (input: RegisterUserInput): RegisterWebhookPayload => ({
   event: "user_registration",
