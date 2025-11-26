@@ -1,4 +1,5 @@
 import { BACKEND_BASE_URL } from "./backend_config";
+import { WEBHOOK_BASE_URL } from "./backend_config";
 
 export interface WebhookResponseNormalized {
   comando: string;
@@ -8,7 +9,7 @@ export interface WebhookResponseNormalized {
   raw?: any;
 }
 
-const WEBHOOK_URL = `${BACKEND_BASE_URL}/webhook/message_input`;
+const WEBHOOK_URL = `${WEBHOOK_BASE_URL}/message_input`;
 
 const getContentMessageText = (content: unknown): string | null => {
   if (!content) return null;

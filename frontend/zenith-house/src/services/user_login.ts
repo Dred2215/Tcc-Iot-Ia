@@ -1,4 +1,6 @@
 import { BACKEND_BASE_URL } from "./backend_config";
+import { WEBHOOK_BASE_URL } from "./backend_config";
+
 
 export interface LoginResponse {
   status: "success" | "error" | string;
@@ -12,7 +14,7 @@ export interface LoginResponse {
 
 export async function loginUser(email: string, password: string): Promise<LoginResponse> {
   try {
-    const response = await fetch(`${BACKEND_BASE_URL}/login_user`, {
+    const response = await fetch(`${WEBHOOK_BASE_URL}/login_user_webhook`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include", // ⚠️ envia e recebe cookies automaticamente
