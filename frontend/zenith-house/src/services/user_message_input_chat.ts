@@ -8,7 +8,7 @@ export interface WebhookResponseNormalized {
   raw?: any;
 }
 
-const WEBHOOK_URL = `${BACKEND_BASE_URL}/message_input`;
+const WEBHOOK_URL = `${BACKEND_BASE_URL}/webhook/message_input`;
 
 const getContentMessageText = (content: unknown): string | null => {
   if (!content) return null;
