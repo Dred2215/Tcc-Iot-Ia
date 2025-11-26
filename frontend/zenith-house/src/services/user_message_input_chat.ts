@@ -1,4 +1,4 @@
-import { getChatWebhookUrl } from "@/config/env";
+import { BACKEND_BASE_URL } from "./backend_config";
 
 export interface WebhookResponseNormalized {
   comando: string;
@@ -8,7 +8,7 @@ export interface WebhookResponseNormalized {
   raw?: any;
 }
 
-const WEBHOOK_URL = getChatWebhookUrl();
+const WEBHOOK_URL = `${BACKEND_BASE_URL}/message_input`;
 
 const getContentMessageText = (content: unknown): string | null => {
   if (!content) return null;
@@ -24,10 +24,6 @@ const getContentMessageText = (content: unknown): string | null => {
 
 export async function sendUserMessage(message: string): Promise<WebhookResponseNormalized> {
   try {
-    if (!WEBHOOK_URL) {
-      throw new Error("Endpoint do webhook não configurado. Verifique VITE_WEBHOOK_MESSAGE_CHAT_RESPONSE.");
-    }
-
     const res = await fetch(WEBHOOK_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

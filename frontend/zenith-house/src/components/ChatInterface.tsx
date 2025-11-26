@@ -99,7 +99,7 @@ export const ChatInterface = () => {
       setIsLoading(true);
 
       try {
-        // 🚀 Envia comando para o n8n e recebe payload normalizado
+        // 🚀 Envia comando para o backend (/message_input) e recebe payload normalizado
         const response = await sendUserMessage(trimmedText);
         console.log("[DEBUG] Payload normalizado:", response);
 
