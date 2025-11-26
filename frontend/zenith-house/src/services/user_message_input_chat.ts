@@ -6,7 +6,7 @@ export interface WebhookResponseNormalized {
   raw?: any;
 }
 
-const WEBHOOK_URL = (import.meta.env.VITE_WEBHOOK_MESSAGE_CHAT_RESPONSE as string | undefined)?.trim() || "";
+const WEBHOOK_URL = (import.meta.env.VITE_WEBHOOK_MESSAGE_CHAT_RESPONSE as string | undefined)?.trim() || "https://tcc-iot-n8n.dlivfa.easypanel.host/webhook/message_input";
 
 const getContentMessageText = (content: unknown): string | null => {
   if (!content) return null;
