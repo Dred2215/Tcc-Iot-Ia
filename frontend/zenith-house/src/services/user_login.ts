@@ -1,3 +1,5 @@
+import { BACKEND_BASE_URL } from "./backend_config";
+
 export interface LoginResponse {
   status: "success" | "error" | string;
   message?: string;
@@ -7,11 +9,6 @@ export interface LoginResponse {
     email: string;
   };
 }
-
-const BACKEND_BASE_URL = (
-  (import.meta.env.VITE_BACKEND_BASE_URL as string | undefined)?.trim() ||
-  "http://localhost:8000"
-).replace(/\/$/, "");
 
 export async function loginUser(email: string, password: string): Promise<LoginResponse> {
   try {

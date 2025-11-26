@@ -35,12 +35,7 @@ FRONTEND_HOMOLOG_HTTP_URL = os.getenv(
     "FRONTEND_HOMOLOG_HTTP_URL",
     "http://tcc-iot-frontend-homolog.dlivfa.easypanel.host",
 )
-FRONTEND_LOCAL_URL = os.getenv("FRONTEND_LOCAL_URL", "http://localhost:8080")
-FRONTEND_ALT_LOCAL_URL = os.getenv("FRONTEND_ALT_LOCAL_URL", "http://localhost:5173")
-BACKEND_LOCAL_URL = os.getenv("BACKEND_LOCAL_URL", "http://localhost:8000")
-BACKEND_BASE_URL = os.getenv(
-    "BACKEND_BASE_URL", os.getenv("BACKEND_URL", "http://localhost:8000")
-)
+BACKEND_BASE_URL = os.getenv("BACKEND_BASE_URL") or os.getenv("BACKEND_URL")
 SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE")
 
 
@@ -70,9 +65,7 @@ def _build_allowed_origins() -> list[str]:
         FRONTEND_URL,
         FRONTEND_HOMOLOG_URL,
         FRONTEND_HOMOLOG_HTTP_URL,
-        FRONTEND_LOCAL_URL,
-        FRONTEND_ALT_LOCAL_URL,
-        BACKEND_LOCAL_URL,
+        BACKEND_BASE_URL,
         *_split_extra_origins(os.getenv("CORS_EXTRA_ORIGINS")),
     ]
 
@@ -85,7 +78,10 @@ def _build_allowed_origins() -> list[str]:
             allowed.append(sanitized)
             seen.add(sanitized)
 
-    return allowed or ["http://localhost:8080"]
+    if not allowed:
+        raise RuntimeError("Nenhuma origem válida configurada para CORS.")
+
+    return allowed
 
 
 def _should_use_secure_cookie(request: Request) -> bool:
@@ -93,7 +89,7 @@ def _should_use_secure_cookie(request: Request) -> bool:
     if flag is not None:
         return flag
 
-    if BACKEND_BASE_URL.startswith("https://"):
+    if BACKEND_BASE_URL and BACKEND_BASE_URL.startswith("https://"):
         return True
 
     return request.url.scheme == "https"
@@ -116,7 +112,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# 🔒 CORS autorizado apenas para domínios homologados/local
+# 🔒 CORS autorizado apenas para domínios configurados nos envs
 origins = _build_allowed_origins()
 
 app.add_middleware(

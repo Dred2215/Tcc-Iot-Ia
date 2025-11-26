@@ -1,6 +1,7 @@
 ﻿import { FormEvent, useState, useRef, useEffect } from "react";
 import { z } from "zod";
 import { sendUserMessage } from "@/services/user_message_input_chat";
+import { BACKEND_BASE_URL } from "@/services/backend_config";
 
 interface Message {
   id: string;
@@ -20,12 +21,6 @@ const messageSchema = z.object({
 interface ChatMessageProps {
   message: Message;
 }
-
-// 🔗 Endpoint do backend configurável via VITE_BACKEND_BASE_URL
-const BACKEND_BASE_URL = (
-  (import.meta.env.VITE_BACKEND_BASE_URL as string | undefined)?.trim() ||
-  (typeof window !== "undefined" ? window.location.origin : "http://localhost:8000")
-).replace(/\/$/, "");
 
 const NOTIFY_ENDPOINT = `${BACKEND_BASE_URL}/notificar-mensagem-ia`;
 
