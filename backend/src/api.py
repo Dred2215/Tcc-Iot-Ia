@@ -45,6 +45,8 @@ app = FastAPI(lifespan=lifespan)
 
 # 🔒 CORS fixo: apenas o frontend homolog pode acessar
 origins = [
+    "https://tcc-iot-backend-homolog.dlivfa.easypanel.host/login_user",
+    "https://tcc-iot-backend-homolog.dlivfa.easypanel.host",
     "https://tcc-iot-frontend-homolog.dlivfa.easypanel.host",
     "http://tcc-iot-frontend-homolog.dlivfa.easypanel.host",
     "http://localhost:8000/record",
