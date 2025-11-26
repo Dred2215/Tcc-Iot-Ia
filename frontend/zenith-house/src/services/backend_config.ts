@@ -1,5 +1,5 @@
 const rawBackendBaseUrl = (
-  typeof import.meta !== "undefined" ? ((import.meta as any).env?.VITE_BACKEND_BASE_URL as string | undefined) : undefined
+  typeof import.meta !== "undefined" ? ((import.meta as any).env?.VITE_WEBHOOK_MESSAGE_CHAT_RESPONSE as string | undefined) : undefined
 )?.trim();
 
 if (!rawBackendBaseUrl) {
