@@ -7,7 +7,7 @@ from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import uvicorn
-from tratamento_response_IA import inicializar_dispositivos, processar_resposta
+from .tratamento_response_IA import inicializar_dispositivos, processar_resposta
 from starlette.websockets import WebSocketState
 
 # ======================================================

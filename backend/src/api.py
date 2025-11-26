@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 
-from tratamento_response_IA import processar_resposta, inicializar_dispositivos, DISPOSITIVOS
+from .tratamento_response_IA import processar_resposta, inicializar_dispositivos, DISPOSITIVOS
 
 
 N8N_LOGIN_URL = os.getenv("N8N_LOGIN_URL")

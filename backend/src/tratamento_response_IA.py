@@ -1,8 +1,8 @@
 import asyncio
 from typing import Any, Optional
 
-from dispositivos import Lampada, Portao, SensorPortao
-from config_tuya import get_home_id, get_openapi
+from .dispositivos import Lampada, Portao, SensorPortao
+from .config_tuya import get_home_id, get_openapi
 
 # Containers vazios (serão preenchidos na inicialização)
 DISPOSITIVOS = {}
