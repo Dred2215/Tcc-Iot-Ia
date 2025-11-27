@@ -165,10 +165,19 @@ async def auth_check_user(request: Request):  # endpoint para validar cookie de 
             )
 
         if n8n_response.status_code != 200:  # se sessão inválida
-            raise HTTPException(status_code=401, detail="❌ Sessão inválida/expirada no n8n")  # retorna 401
+            print(
+                f"[AUTH CHECK] N8N respondeu {n8n_response.status_code}: {n8n_response.text}"
+            )
+            raise HTTPException(
+                status_code=n8n_response.status_code,
+                detail=n8n_response.text or "Sessão inválida/expirada no n8n",
+            )
 
         return {"status": "valid", "data": n8n_response.json()}  # retorna sessão válida
 
+    except HTTPException:
+        # Propaga erros HTTP já tratados acima (inclusive 4xx do n8n)
+        raise
     except Exception as e:  # se houver falha na request ao n8n
         print(f"[ERRO AUTH CHECK] {e}")  # loga erro
         raise HTTPException(status_code=500, detail="Erro interno ao validar sessão")  # devolve 500
