@@ -10,6 +10,7 @@ export interface WebhookResponseNormalized {
 }
 
 const WEBHOOK_URL = `${BACKEND_BASE_URL}/message_input`;
+const MESSAGE_ORIGIN = "prod-origin";
 
 const getContentMessageText = (content: unknown): string | null => {
   if (!content) return null;
@@ -27,9 +28,12 @@ export async function sendUserMessage(message: string): Promise<WebhookResponseN
   try {
     const res = await fetch(WEBHOOK_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Origin": MESSAGE_ORIGIN, // ajuda o n8n a identificar a origem
+      },
       credentials: "include", // ⚠️ envia e recebe cookies automaticamente
-      body: JSON.stringify({ comando: message }),
+      body: JSON.stringify({ comando: message, origin: MESSAGE_ORIGIN }),
     });
 
     if (!res.ok) {

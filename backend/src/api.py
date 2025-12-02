@@ -289,12 +289,13 @@ async def ping():  # endpoint para testar se o backend está online
 # ==========================
 class ChatRequest(BaseModel):
     comando: str
+    origin: Optional[str] = None
 
 # ==========================
 # 📨 Endpoint: Proxy de Chat (Texto)
 # ==========================
 @app.post("/message_input")
-async def chat_message_proxy(request: ChatRequest):
+async def chat_message_proxy(request: ChatRequest, raw_request: Request):
     """
     Recebe a mensagem de texto do frontend e encaminha para o webhook do N8N.
     """
@@ -302,10 +303,20 @@ async def chat_message_proxy(request: ChatRequest):
         webhook_url = f"{WEBHOOK_BASE_URL}/message_input"
         print(f"[CHAT] → Encaminhando mensagem para N8N em {webhook_url}")
 
+        # Tenta descobrir a origem: primeiro do body, depois do header
+        origin = request.origin or raw_request.headers.get("x-origin") or raw_request.headers.get("origin")
+        payload = {"comando": request.comando}
+        if origin:
+            payload["origin"] = origin
+
+        headers = {"X-Origin": origin} if origin else {}
+
+        # Encaminha para o N8N com cabeçalho opcional de origem
         async with httpx.AsyncClient(timeout=30.0) as client:
             n8n_response = await client.post(
                 webhook_url,
-                json={"comando": request.comando}
+                json=payload,
+                headers=headers or None,
             )
         
         if n8n_response.status_code != 200:
