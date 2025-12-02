@@ -22,7 +22,7 @@ interface ChatMessageProps {
   message: Message;
 }
 
-const NOTIFY_ENDPOINT = `${BACKEND_BASE_URL}/notificar-mensagem-ia`;
+const NOTIFY_ENDPOINT = `${BACKEND_BASE_URL}/message_input`;
 
 
 const ChatMessage = ({ message }: ChatMessageProps) => {
