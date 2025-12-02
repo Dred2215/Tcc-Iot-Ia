@@ -9,7 +9,7 @@ export interface WebhookResponseNormalized {
   raw?: any;
 }
 
-const WEBHOOK_URL = `${WEBHOOK_BASE_URL}/message_input`;
+const WEBHOOK_URL = `${BACKEND_BASE_URL}/message_input`;
 
 const getContentMessageText = (content: unknown): string | null => {
   if (!content) return null;
@@ -28,6 +28,7 @@ export async function sendUserMessage(message: string): Promise<WebhookResponseN
     const res = await fetch(WEBHOOK_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include", // ⚠️ envia e recebe cookies automaticamente
       body: JSON.stringify({ comando: message }),
     });
 

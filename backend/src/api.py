@@ -1,13 +1,18 @@
 import json  # manipulação de dados e logs em JSON
 import os  # acesso às variáveis de ambiente do sistema
+import asyncio # programação assíncrona
 import httpx  # cliente HTTP assíncrono para chamar os webhooks do n8n
+import aiohttp # cliente HTTP assíncrono para websockets
 from pathlib import Path  # manipulação de caminhos de arquivo
 from urllib.parse import urlsplit, urlparse  # parsing de URLs para normalização de origens
-from fastapi import FastAPI, HTTPException, Response, Request, Body  # core do FastAPI
+from fastapi import FastAPI, HTTPException, Response, Request, Body, WebSocket  # core do FastAPI
 from fastapi.middleware.cors import CORSMiddleware  # middleware para liberar CORS
 from pydantic import BaseModel  # criação de DTOs de request/response pydantic
 from contextlib import asynccontextmanager  # gerencia o ciclo de vida (startup/shutdown)
 from typing import Optional  # importa o tipo Optional para permitir tipar campos opcionais sem erro
+from starlette.websockets import WebSocketState # estados do websocket
+
+from .tratamento_response_IA import inicializar_dispositivos, processar_resposta # lógica de dispositivos
 
 
 # ==========================
@@ -50,6 +55,11 @@ N8N_LOGIN_URL = os.getenv("N8N_LOGIN_URL")  # URL final do fluxo de login do n8n
 N8N_AUTH_CHECK_URL = os.getenv("N8N_AUTH_CHECK_URL")  # URL final do fluxo de verificação de sessão no n8n
 N8N_LOG_WEBHOOK = os.getenv("N8N_LOG_WEBHOOK")  # webhook de log do n8n
 WEBHOOK_BASE_URL = os.getenv("WEBHOOK_BASE_URL")  # base para compor rotas do n8n
+WEBHOOK_RECEIVE_MESSAGE = (
+    os.getenv("VITE_WEBHOOK_MESSAGE_CHAT_RESPONSE")
+    or os.getenv("WEBHOOK_MESSAGE_CHAT_RESPONSE")
+    or os.getenv("WEBHOOK_RECIVE_MESSAGE")
+)
 
 if not WEBHOOK_BASE_URL:  # se faltar a base do n8n
     raise RuntimeError("❌ WEBHOOK_BASE_URL não configurado no backend/src/.env")  # aborta startup
@@ -64,6 +74,13 @@ WEBHOOK_BASE_URL = WEBHOOK_BASE_URL.rstrip("/")  # remove "/" do final para evit
 async def lifespan(app: FastAPI):  # gerencia startup e shutdown
     print("🔄 [STARTUP] Servidor FastAPI iniciando...")  # loga início do servidor
     print(f"[ENV] Webhook Base URL configurado: {WEBHOOK_BASE_URL}")  # valida leitura da variável
+    
+    # Inicializa dispositivos Tuya
+    try:
+        inicializar_dispositivos()
+    except Exception as e:
+        print(f"⚠️ [STARTUP] Erro ao inicializar dispositivos: {e}")
+
     yield  # entrega execução para o app rodar
     print("🛑 [SHUTDOWN] Servidor FastAPI finalizando...")  # loga encerramento
 
@@ -194,6 +211,152 @@ async def voice_command(req: VoiceCommand):  # endpoint que recebe texto final d
 @app.get("/ping")
 async def ping():  # endpoint para testar se o backend está online
     return {"message": "Backend está online 🚀"}  # indica que o backend está respondendo corretamente
+
+
+# ==========================
+# 💬 DTOs para Chat
+# ==========================
+class ChatRequest(BaseModel):
+    comando: str
+
+# ==========================
+# 📨 Endpoint: Proxy de Chat (Texto)
+# ==========================
+@app.post("/message_input")
+async def chat_message_proxy(request: ChatRequest):
+    """
+    Recebe a mensagem de texto do frontend e encaminha para o webhook do N8N.
+    """
+    try:
+        webhook_url = f"{WEBHOOK_BASE_URL}/message_input"
+        print(f"[CHAT] → Encaminhando mensagem para N8N em {webhook_url}")
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            n8n_response = await client.post(
+                webhook_url,
+                json={"comando": request.comando}
+            )
+        
+        if n8n_response.status_code != 200:
+            print(f"⚠️ [CHAT] Erro N8N: {n8n_response.text}")
+            raise HTTPException(status_code=n8n_response.status_code, detail="Erro ao processar mensagem no N8N")
+
+        # Tenta fazer parse do JSON, se falhar retorna texto puro envelopado
+        try:
+            return n8n_response.json()
+        except json.JSONDecodeError:
+            return {"raw_response": n8n_response.text}
+
+    except Exception as e:
+        print(f"[ERRO CHAT] {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ======================================================
+# 👂 WebSocket HOTWORD (aguarda "bob" e encerra)
+# ======================================================
+@app.websocket("/ws-hotword")
+async def websocket_hotword(websocket: WebSocket):
+    await websocket.accept()
+    print("👂 [HOTWORD] Cliente conectado")
+    await websocket.send_text("✅ Detector ativo. Diga 'bob' para iniciar comando.")
+
+    try:
+        while True:
+            data = await websocket.receive_text()
+            print(f"📩 [HOTWORD] Recebido: {data}")
+
+            if "bob" in data.lower():
+                print("🎯 [HOTWORD] Hotword detectada — encerrando conexão.")
+                await websocket.send_text("🚀 Hotword detectada: 'bob'")
+                await asyncio.sleep(0.3)
+                break
+            else:
+                await websocket.send_text("🗣️ Aguardando hotword...")
+
+    except Exception as e:
+        print(f"⚠️ [HOTWORD] Erro ou desconexão: {e}")
+
+    finally:
+        if websocket.application_state != WebSocketState.DISCONNECTED:
+            await websocket.close()
+        print("🔌 [HOTWORD] Conexão encerrada.")
+
+
+# ======================================================
+# 🎙️ WebSocket VOICE (envia mensagem ao webhook e executa resposta)
+# ======================================================
+@app.websocket("/ws-voice")
+async def websocket_voice(websocket: WebSocket):
+    """
+    Recebe o comando completo do frontend e envia para o webhook
+    definido em WEBHOOK_RECEIVE_MESSAGE. Depois, envia o retorno para
+    o tratamento_response_IA.py, que executa o comando nos dispositivos.
+    """
+    await websocket.accept()
+    print("🎤 [VOICE] Cliente conectado")
+    await websocket.send_text("🟢 Conexão de voz estabelecida com o servidor.")
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            while True:
+                # 🗣️ Recebe mensagem do frontend
+                data = await websocket.receive_text()
+                print(f"📩 [VOICE] Mensagem recebida: {data}")
+
+                if not WEBHOOK_RECEIVE_MESSAGE:
+                    await websocket.send_text("⚠️ Nenhum webhook configurado no servidor (WEBHOOK_RECEIVE_MESSAGE).")
+                    continue
+
+                try:
+                    # 🚀 Envia a mensagem ao webhook
+                    # Ajustado para usar "comando" para consistência com o módulo de texto
+                    async with session.post(
+                        WEBHOOK_RECEIVE_MESSAGE,
+                        json={"comando": data},
+                        timeout=15,
+                    ) as resp:
+                        try:
+                            # 📡 Tenta decodificar resposta JSON
+                            response_json = await resp.json(content_type=None)
+                            resposta_formatada = json.dumps(response_json, indent=2, ensure_ascii=False)
+
+                            print(f"📤 [WEBHOOK] Status {resp.status} | Resposta JSON:\n{resposta_formatada}")
+                            await websocket.send_text(
+                                f"✅ Resposta do webhook ({resp.status}): {resposta_formatada}"
+                            )
+
+                            # ⚙️ Envia resposta para tratamento e execução local
+                            feedbacks = await processar_resposta(response_json)
+                            if feedbacks:
+                                for feedback in feedbacks:
+                                    mensagem = feedback.get("message")
+                                    if mensagem:
+                                        await websocket.send_text(mensagem)
+
+                        except Exception:
+                            # Caso o retorno não seja JSON, envia texto cru
+                            response_text = await resp.text()
+                            print(f"📤 [WEBHOOK] Status {resp.status} | Texto:\n{response_text}")
+                            await websocket.send_text(
+                                f"✅ Resposta do webhook ({resp.status}): {response_text}"
+                            )
+
+                except asyncio.TimeoutError:
+                    print("⏰ [WEBHOOK] Timeout ao enviar mensagem.")
+                    await websocket.send_text("⚠️ O webhook demorou para responder.")
+                except Exception as e:
+                    print(f"⚠️ [WEBHOOK] Erro ao enviar: {e}")
+                    await websocket.send_text(f"⚠️ Erro ao enviar para o webhook: {e}")
+
+    except Exception as e:
+        print(f"⚠️ [VOICE] Erro ou desconexão: {e}")
+
+    finally:
+        if websocket.application_state != WebSocketState.DISCONNECTED:
+            await websocket.close()
+        print("🔌 [VOICE] Conexão encerrada.")
+
 
 if __name__ == "__main__":
     import uvicorn  # servidor ASGI para rodar FastAPI
