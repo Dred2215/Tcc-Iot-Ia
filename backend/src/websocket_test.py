@@ -34,9 +34,16 @@ inicializar_dispositivos()
 # ======================================================
 # 🌐 CORS
 # ======================================================
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
+origins = [origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()]
+
+# Se vazio, fallback para * ou lista padrão (mas * é arriscado se usar credentials)
+if not origins:
+    origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

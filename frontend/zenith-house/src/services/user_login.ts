@@ -1,6 +1,3 @@
-import { BACKEND_BASE_URL } from "./backend_config";
-
-
 export interface LoginResponse {
   status: "success" | "error" | string;
   message?: string;
@@ -11,9 +8,14 @@ export interface LoginResponse {
   };
 }
 
+
+
+const BACKEND_URL = import.meta.env.VITE_BACKEND_BASE_URL || "http://localhost:8000";
+const LOGIN_URL = `${BACKEND_URL}/login_user`;
+
 export async function loginUser(email: string, password: string): Promise<LoginResponse> {
   try {
-    const response = await fetch(`${BACKEND_BASE_URL}/login_user`, {
+    const response = await fetch(LOGIN_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include", // ⚠️ envia e recebe cookies automaticamente

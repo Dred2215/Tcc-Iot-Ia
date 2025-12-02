@@ -3,18 +3,6 @@ import { useEffect, useState, useRef } from "react";
 import { ArrowLeft, Mic, Square } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
-const resolveWsBase = () => {
-  const envBase = (import.meta.env.VITE_VOICE_WS_BASE as string | undefined)?.trim();
-  if (envBase) return envBase.replace(/\/$/, "");
-
-  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  const host = window.location.hostname;
-  const port = (import.meta.env.VITE_VOICE_WS_PORT as string | undefined)?.trim() || "8008";
-  return `${protocol}://${host}${port ? `:${port}` : ""}`;
-};
-
-const buildWsUrl = (path: string) => `${resolveWsBase()}${path}`;
-
 const Voice = () => {
   const navigate = useNavigate();
 
@@ -26,12 +14,14 @@ const Voice = () => {
   const socketRef = useRef<WebSocket | null>(null);
   const hotwordRef = useRef<WebSocket | null>(null);
 
+  const WS_BASE_URL = import.meta.env.VITE_VOICE_WS_URL || "ws://localhost:8008";
+
   // =====================================================
   // 🧠 HOTWORD - conecta automaticamente ao abrir a tela
   // =====================================================
   const connectHotwordWebSocket = () => {
     try {
-      const ws = new WebSocket(buildWsUrl("/ws-hotword"));
+      const ws = new WebSocket(`${WS_BASE_URL}/ws-hotword`);
 
       ws.onopen = () => {
         console.log("👂 [HOTWORD] Conectado.");
@@ -77,7 +67,7 @@ const Voice = () => {
   const connectVoiceWebSocket = async (): Promise<void> => {
     try {
       setIsLoading(true);
-      const ws = new WebSocket(buildWsUrl("/ws-voice"));
+      const ws = new WebSocket(`${WS_BASE_URL}/ws-voice`);
 
       ws.onopen = () => {
         console.log("🎧 [VOICE] Conectado.");

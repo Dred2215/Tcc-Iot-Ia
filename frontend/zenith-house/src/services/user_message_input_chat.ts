@@ -1,6 +1,3 @@
-import { BACKEND_BASE_URL } from "./backend_config";
-import { WEBHOOK_BASE_URL } from "./backend_config";
-
 export interface WebhookResponseNormalized {
   comando: string;
   respostaIA: string;
@@ -9,7 +6,7 @@ export interface WebhookResponseNormalized {
   raw?: any;
 }
 
-const WEBHOOK_URL = `${WEBHOOK_BASE_URL}/message_input`;
+const WEBHOOK_URL = import.meta.env.VITE_WEBHOOK_MESSAGE_CHAT_RESPONSE || "";
 
 const getContentMessageText = (content: unknown): string | null => {
   if (!content) return null;
@@ -25,14 +22,28 @@ const getContentMessageText = (content: unknown): string | null => {
 
 export async function sendUserMessage(message: string): Promise<WebhookResponseNormalized> {
   try {
-    const res = await fetch(WEBHOOK_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ comando: message }),
-    });
+    if (!WEBHOOK_URL) {
+      throw new Error("Endpoint do webhook não configurado. Verifique VITE_WEBHOOK_MESSAGE_CHAT_RESPONSE.");
+    }
+
+    let res;
+    try {
+      res = await fetch(WEBHOOK_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comando: message }),
+      });
+    } catch (fetchError: any) {
+      console.error("[Fetch Error]", fetchError);
+      // TypeError geralmente indica falha de rede ou bloqueio CORS
+      if (fetchError.name === "TypeError" || fetchError.message?.includes("Failed to fetch")) {
+        throw new Error("Erro de conexão (possível bloqueio CORS ou falha de rede) ao contatar o Webhook.");
+      }
+      throw fetchError;
+    }
 
     if (!res.ok) {
-      throw new Error(`Erro na requisição: ${res.statusText}`);
+      throw new Error(`Erro na requisição: ${res.status} ${res.statusText}`);
     }
 
     const rawText = await res.text();

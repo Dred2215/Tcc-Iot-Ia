@@ -1,7 +1,6 @@
-﻿import { FormEvent, useState, useRef, useEffect } from "react";
+import { FormEvent, useState, useRef, useEffect } from "react";
 import { z } from "zod";
 import { sendUserMessage } from "@/services/user_message_input_chat";
-import { BACKEND_BASE_URL } from "@/services/backend_config";
 
 interface Message {
   id: string;
@@ -22,7 +21,9 @@ interface ChatMessageProps {
   message: Message;
 }
 
-const NOTIFY_ENDPOINT = `${BACKEND_BASE_URL}/notificar-mensagem-ia`;
+// 🔒 Endpoint do backend FastAPI
+const BACKEND_URL = import.meta.env.VITE_BACKEND_BASE_URL || "http://localhost:8000";
+const NOTIFY_ENDPOINT = `${BACKEND_URL}/notificar-mensagem-ia`;
 
 
 const ChatMessage = ({ message }: ChatMessageProps) => {
@@ -99,7 +100,7 @@ export const ChatInterface = () => {
       setIsLoading(true);
 
       try {
-        // 🚀 Envia comando para o backend (/message_input) e recebe payload normalizado
+        // 🚀 Envia comando para o n8n e recebe payload normalizado
         const response = await sendUserMessage(trimmedText);
         console.log("[DEBUG] Payload normalizado:", response);
 

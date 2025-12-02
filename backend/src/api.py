@@ -1,201 +1,261 @@
-import json  # manipulação de dados e logs em JSON
-import os  # acesso às variáveis de ambiente do sistema
-import httpx  # cliente HTTP assíncrono para chamar os webhooks do n8n
-from pathlib import Path  # manipulação de caminhos de arquivo
-from urllib.parse import urlsplit, urlparse  # parsing de URLs para normalização de origens
-from fastapi import FastAPI, HTTPException, Response, Request, Body  # core do FastAPI
-from fastapi.middleware.cors import CORSMiddleware  # middleware para liberar CORS
-from pydantic import BaseModel  # criação de DTOs de request/response pydantic
-from contextlib import asynccontextmanager  # gerencia o ciclo de vida (startup/shutdown)
-from typing import Optional  # importa o tipo Optional para permitir tipar campos opcionais sem erro
+import asyncio
+import json
+import os
+import httpx
+from datetime import datetime, timezone
+from pathlib import Path
+from uuid import uuid4
+from typing import Any, Optional
+from fastapi import FastAPI, HTTPException, UploadFile, File, Response, Request, Body
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from contextlib import asynccontextmanager
 
 
-# ==========================
-# 🗂️ Carregar variáveis do .env
-# ==========================
 
-BASE_DIR = Path(__file__).resolve().parent  # obtém diretório onde o arquivo api.py está localizado
-load_env_path = BASE_DIR / ".env"  # caminho para o arquivo .env na mesma pasta
-from dotenv import load_dotenv  # carrega variável de ambiente do .env
-load_dotenv(load_env_path)  # lê as variáveis do arquivo .env e injeta em os.environ
+# 👉 Import ajustado (usa src.)
+from tratamento_response_IA import processar_resposta, inicializar_dispositivos, DISPOSITIVOS
 
-# ==========================
-# 🧩 Funções auxiliares
-# ==========================
 
-def _sanitize_origin(url: str) -> Optional[str]:  # recebe uma string e tenta converter para um origin válido
-    if not isinstance(url, str) or not url.strip():  # se o valor não for string ou for vazio
-        return None  # descartamos, não é um origin
-    parsed = urlparse(url.strip())  # faz parse da URL removendo espaços
-    if parsed.scheme in {"http", "https"} and parsed.netloc:  # precisamos de http(s) + host
-        return f"{parsed.scheme}://{parsed.netloc}"  # devolve apenas origin, ex: "https://site.com"
-    return None  # se não bateu critério, descartamos
-
-def collect_env_origins() -> list[str]:  # varre TODAS as variáveis de ambiente e captura URLs como origins permitidos
-    origins = set()  # conjunto para evitar duplicação
-    for value in os.environ.values():  # percorre valores da env
-        origin = _sanitize_origin(value)  # tenta limpar e validar URL como origin
-        if origin:  # se for válida
-            origins.add(origin)  # adiciona ao conjunto
-    return sorted(origins)  # retorna lista ordenada
-
-def parse_bool_env(value: Optional[str]) -> bool:  # converte env string para bool
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}  # retorna True se o valor indicar positivo
-
-# ==========================
-# 🧭 Variáveis de ambiente do projeto
-# ==========================
-
-N8N_LOGIN_URL = os.getenv("N8N_LOGIN_URL")  # URL final do fluxo de login do n8n
-N8N_AUTH_CHECK_URL = os.getenv("N8N_AUTH_CHECK_URL")  # URL final do fluxo de verificação de sessão no n8n
-N8N_LOG_WEBHOOK = os.getenv("N8N_LOG_WEBHOOK")  # webhook de log do n8n
-WEBHOOK_BASE_URL = os.getenv("WEBHOOK_BASE_URL")  # base para compor rotas do n8n
-
-if not WEBHOOK_BASE_URL:  # se faltar a base do n8n
-    raise RuntimeError("❌ WEBHOOK_BASE_URL não configurado no backend/src/.env")  # aborta startup
-
-WEBHOOK_BASE_URL = WEBHOOK_BASE_URL.rstrip("/")  # remove "/" do final para evitar duplicar barra ao compor rotas
-
-# ==========================
-# ♻️ Ciclo de vida da API
-# ==========================
+N8N_LOGIN_URL = os.getenv("N8N_LOGIN_URL", "https://nery-automa-n8n.dlivfa.easypanel.host/webhook/login_user_webhook")
+N8N_AUTH_CHECK_URL = os.getenv("N8N_AUTH_CHECK_URL", "https://nery-automa-n8n.dlivfa.easypanel.host/webhook/auth_check_user")
+N8N_LOG_WEBHOOK = os.getenv("N8N_LOG_WEBHOOK", "https://nery-automa-n8n.dlivfa.easypanel.host/webhook/e50fda8a-c42f-48d8-87a8-94d9f62b382b")
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):  # gerencia startup e shutdown
-    print("🔄 [STARTUP] Servidor FastAPI iniciando...")  # loga início do servidor
-    print(f"[ENV] Webhook Base URL configurado: {WEBHOOK_BASE_URL}")  # valida leitura da variável
-    yield  # entrega execução para o app rodar
-    print("🛑 [SHUTDOWN] Servidor FastAPI finalizando...")  # loga encerramento
+async def lifespan(app: FastAPI):
+    print("🔄 Servidor iniciando...")
+    print(f"✅ VARIÁVEL DE AMBIENTE PORT: {os.getenv('PORT')}")
 
-app = FastAPI(lifespan=lifespan)  # cria o app principal
+    # 🚀 Inicializa os dispositivos/cenas aqui
+    try:
+        inicializar_dispositivos()
+        print("[INIT] Dispositivos e cenas prontos:", list(DISPOSITIVOS.keys()))
+    except Exception as e:
+        print(f"[ERRO] Falha ao inicializar dispositivos/cenas: {e}")
 
-# ==========================
-# 🌍 Configuração do CORS
-# ==========================
+    print("✅ Backend pronto para receber conexões!")
+    yield
+    print("🛑 Encerrando aplicação...")
 
-dev_origins = [  # origens padrão para desenvolvimento local
-    "http://localhost:5173",  # Vite dev server local
-    "http://localhost:8080",  # possibilidades comuns de front local
-]
+app = FastAPI(lifespan=lifespan)
 
-env_origins = collect_env_origins()  # coleta todas URLs válidas das envs
+# 🔒 CORS Configuration
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
+origins = [origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()]
 
-final_origins = sorted({*dev_origins, *env_origins})  # une localhosts + origins do .env
-
-print(f"[CORS] Origens permitidas para chamadas externas: {final_origins}")  # loga para debug
+# Fallback origins if env var is empty
+if not origins:
+    origins = [
+        "https://tcc-iot-frontend-homolog.dlivfa.easypanel.host",
+        "http://tcc-iot-frontend-homolog.dlivfa.easypanel.host",
+        "http://localhost:8000",
+        "http://localhost:8080",
+        "http://localhost:5173", # Vite default
+    ]
 
 app.add_middleware(
-    CORSMiddleware,  # ativa middleware de CORS
-    allow_origins=final_origins,  # libera todas origens coletadas
-    allow_credentials=True,  # permite cookies nas requisições
-    allow_methods=["*"],  # libera todos métodos HTTP
-    allow_headers=["*"],  # libera todos headers
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# ==========================
-# 🧾 DTOs de request
-# ==========================
+# ✅ Modelo da request
+class MensagemRequest(BaseModel):
+    mensagem: Optional[str] = ""
+    comando: Optional[Any] = ""
+    tipo: Optional[str] = ""
 
-class VoiceCommand(BaseModel):  # modelo de comando de voz em texto
-    message: str  # texto final reconhecido via STT no front
+# ✅ Endpoint de notificação
+@app.post("/notificar-mensagem-ia")
+async def notificar_mensagem_ia(
+    data: dict = Body(...)
+):
+    """
+    Recebe notificações do frontend contendo:
+    - user_message: comando do usuário
+    - mensagem: resposta da IA
+    - comando: estrutura bruta retornada pelo n8n
+    - tipo: tipo da mensagem (IOT ou general)
+    - device: nome do dispositivo
+    - action: ação executada
+    """
 
-class LoginRequest(BaseModel):  # modelo esperado no login
-    email: str  # email a ser enviado pelo frontend
-    password: str  # senha a ser enviada pelo frontend
+    # 🔍 Log completo do payload recebido
+    print("\n[📩 NOVA NOTIFICAÇÃO RECEBIDA]")
+    print(json.dumps(data, indent=2, ensure_ascii=False))
 
-# ==========================
-# 🔑 Endpoint: Login do Usuário via n8n
-# ==========================
+    # Extrai campos principais
+    user_message = data.get("user_message")
+    mensagem = data.get("mensagem")
+    comando = data.get("comando")
+    tipo = data.get("tipo")
+    device = data.get("device")
+    action = data.get("action")
 
-@app.post("/login_user")
-async def login_user(request: Request, response: Response, data: LoginRequest):  # endpoint que faz proxy de login para o n8n
+    print(f"\n[INFO] Tipo: {tipo}")
+    print(f"[INFO] Usuário disse: {user_message}")
+    print(f"[INFO] Resposta da IA: {mensagem}")
+    print(f"[INFO] Dispositivo: {device}")
+    print(f"[INFO] Ação: {action}")
+
+    # Se houver comando bruto, tenta converter para objeto
+    comando_obj = comando
+    if isinstance(comando, str) and comando.strip().startswith(('{', '[')):
+        try:
+            comando_obj = json.loads(comando)
+        except json.JSONDecodeError:
+            print(f"[ERRO] JSON inválido em 'comando': {comando}")
+            raise HTTPException(status_code=400, detail="Comando JSON inválido")
+
+    # 🚀 Envia o payload completo para o webhook do n8n
     try:
-        login_url = f"{WEBHOOK_BASE_URL}/login_user_webhook"  # compõe URL correta do n8n usando a base definida
-        print(f"[LOGIN] → Chamando fluxo do n8n em {login_url}")  # loga a URL chamada
-
-        async with httpx.AsyncClient(timeout=10.0) as client:  # cria cliente HTTP assíncrono
-            n8n_response = await client.post(
-                login_url,  # URL do fluxo de login no n8n
-                json={"email": data.email, "password": data.password},  # envia credenciais como JSON no body
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                N8N_LOG_WEBHOOK,
+                json={
+                    "user_message": user_message,
+                    "mensagem": mensagem,
+                    "tipo": tipo,
+                    "device": device,
+                    "action": action,
+                    "comando": comando_obj
+                }
             )
+            print(f"[WEBHOOK N8N] Status: {response.status_code}")
+            print(f"[WEBHOOK N8N] Resposta: {response.text}")
+    except Exception as e:
+        print(f"[ERRO] Falha ao enviar para o webhook N8N: {e}")
 
-        if n8n_response.status_code != 200:  # se a autenticação falhar
-            raise HTTPException(status_code=401, detail="❌ Credenciais inválidas no fluxo do n8n")  # devolve 401 ao cliente
+    # 🚦 Processa comando IoT localmente se aplicável
+    if tipo == "IOT" and comando_obj:
+        print(f"[AÇÃO] Enviando comando IoT para execução: {comando_obj}")
+        iot_feedback = await processar_resposta(comando_obj)
+        return {
+            "status": "IOT recebido e enviado ao n8n",
+            "device": device,
+            "action": action,
+            "iot_feedback": iot_feedback or []
+        }
 
-        result = n8n_response.json()  # converte resposta do n8n em JSON
-        session_id = result.get("session_id")  # extrai ID de sessão retornado
-
-        if not session_id:  # se não retornou session_id
-            raise HTTPException(status_code=401, detail="❌ session_id não retornado pelo n8n")  # aborta request
-
-        # salva o session_id como cookie seguro no navegador
-        # Esse cookie não pode ser lido via JS (HttpOnly) e só vai em HTTPS se secure=True
-        response.set_cookie(
-            key="session_id",  # nome do cookie
-            value=session_id,  # valor retornado pelo n8n
-            httponly=True,  # protege contra acesso JS
-            secure=request.url.scheme == "https",  # só envia em HTTPS se a request do navegador já foi HTTPS
-            samesite="lax",  # permite redirects GET normais sem bloquear cookie
-            max_age=3600,  # dura 1h
-        )
-
-        return {"status": "success", "user": result.get("user")}  # retorna login ok para o front
-
-    except Exception as e:  # se algo inesperado acontecer
-        print(f"[ERRO LOGIN PROXY] {e}")  # loga o erro
-        raise HTTPException(status_code=500, detail=str(e))  # devolve 500 ao cliente
+    return {
+        "status": "Mensagem registrada e enviada ao n8n",
+        "user_message": user_message,
+        "mensagem": mensagem,
+        "device": device,
+        "action": action,
+        "iot_feedback": []
+    }
 
 
-# ==========================
-# 🕵️ Endpoint: Verifica sessão do usuário no n8n via cookie
-# ==========================
-
-@app.get("/auth_check_user")
-async def auth_check_user(request: Request):  # endpoint para validar cookie de sessão
-    try:
-        session_id = request.cookies.get("session_id")  # pega o cookie enviado pelo navegador
-        print(f"[AUTH CHECK] Cookie recebido: {session_id}")  # loga valor do cookie
-
-        if not session_id:  # se não houver cookie
-            raise HTTPException(status_code=401, detail="❌ Cookie de sessão ausente")  # 401: não autenticado
-
-        async with httpx.AsyncClient(timeout=10.0) as client:  # cria cliente HTTP assíncrono
-            n8n_response = await client.get(
-                f"{N8N_AUTH_CHECK_URL}?session_id={session_id}"  # chama a URL de validação do n8n com o parâmetro de sessão
-            )
-
-        if n8n_response.status_code != 200:  # se sessão inválida
-            raise HTTPException(status_code=401, detail="❌ Sessão inválida/expirada no n8n")  # retorna 401
-
-        return {"status": "valid", "data": n8n_response.json()}  # retorna sessão válida
-
-    except Exception as e:  # se houver falha na request ao n8n
-        print(f"[ERRO AUTH CHECK] {e}")  # loga erro
-        raise HTTPException(status_code=500, detail="Erro interno ao validar sessão")  # devolve 500
-
-
-# ==========================
-# 🎙️ Endpoint: Envia comando de voz em texto reconhecido
-# ==========================
+# ✅ Endpoint para comandos de voz (texto final do WebSocket)
+class VoiceCommand(BaseModel):
+    message: str
 
 @app.post("/voice_command")
-async def voice_command(req: VoiceCommand):  # endpoint que recebe texto final de voz
+async def voice_command(req: VoiceCommand):
+    """
+    Recebe o texto final reconhecido pela voz e envia para o sistema de tratamento.
+    """
     try:
-        print(f"[🎙️VOZ] Comando final recebido: {req.message}")  # loga input de voz
-        return {"status": "ok"}  # resposta simples de ping para o front
+        print(f"[🎙️ VOICE] Comando recebido: {req.message}")
+
+        # 🔹 Envia o texto para o mesmo fluxo usado no chat textual
+        resposta = await processar_resposta(req.message)
+
+        print(f"[🎯 VOICE] Resposta gerada: {resposta}")
+        return {"status": "ok", "response": resposta}
+
     except Exception as e:
-        print(f"[ERRO VOZ] {e}")  # loga erro
-        raise HTTPException(status_code=500, detail=str(e))  # retorna erro 500
+        print(f"[ERRO VOICE] {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-# ==========================
-# 🧪 Endpoint: Ping do backend
-# ==========================
 
+# ✅ Endpoint de teste
 @app.get("/ping")
-async def ping():  # endpoint para testar se o backend está online
-    return {"message": "Backend está online 🚀"}  # indica que o backend está respondendo corretamente
+async def ping():
+    return {"message": "Backend está online 🚀"}
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+@app.post("/login_user")
+async def login_user(request: Request, response: Response, data: LoginRequest):
+    """
+    Endpoint seguro de login.
+    Chama o webhook n8n de login e grava o session_id como cookie HttpOnly.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            n8n_response = await client.post(
+                N8N_LOGIN_URL,
+                json={"email": data.email, "password": data.password}
+            )
+
+        if n8n_response.status_code != 200:
+            raise HTTPException(status_code=401, detail=f"Erro N8N: {n8n_response.status_code}")
+
+        result = n8n_response.json()
+        print("[N8N LOGIN RESULT]", result)
+
+        session_id = result.get("session_id")
+        if not session_id:
+            raise HTTPException(status_code=401, detail="Login sem session_id retornado")
+
+        # Define cookie HttpOnly (TTL já gerenciado pelo n8n/Redis)
+        response.set_cookie(
+            key="session_id",
+            value=session_id,
+            httponly=True,
+            secure=False,  # alterar para True em produção
+            samesite="lax",
+            max_age=3600
+        )
+
+        return {"status": "success", "user": result.get("user")}
+
+    except Exception as e:
+        print(f"[ERRO LOGIN_USER] {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/auth_check_user")
+async def auth_check_user(request: Request):
+    """
+    Valida o cookie de sessão com o webhook n8n.
+    """
+    try:
+        session_id = request.cookies.get("session_id")
+        if not session_id:
+            raise HTTPException(status_code=401, detail="Cookie de sessão ausente")
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            n8n_response = await client.get(f"{N8N_AUTH_CHECK_URL}?session_id={session_id}")
+
+        if n8n_response.status_code != 200:
+            raise HTTPException(status_code=401, detail="Sessão inválida ou expirada")
+
+        data = n8n_response.json()
+        return {"status": "valid", "data": data}
+
+    except Exception as e:
+        print(f"[ERRO AUTH_CHECK] {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+
+# Middleware de log
+@app.middleware("http")
+async def log_requests(request, call_next):
+    print(f"[LOG] {request.method} {request.url}")
+    response = await call_next(request)
+    return response
 
 if __name__ == "__main__":
-    import uvicorn  # servidor ASGI para rodar FastAPI
-    port = int(os.getenv("PORT", 8000))  # lê porta da env, fallback 8000
-    uvicorn.run(app, host="0.0.0.0", port=port)  # sobe servidor garantindo acesso de todas interfaces
+    import uvicorn
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
