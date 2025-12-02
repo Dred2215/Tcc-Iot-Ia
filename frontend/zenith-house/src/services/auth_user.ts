@@ -1,5 +1,4 @@
 import { BACKEND_BASE_URL } from "./backend_config";
-import { WEBHOOK_BASE_URL } from "./backend_config";
 
 export interface AuthCheckResponse {
   status: "success" | "error" | "valid" | string;
@@ -11,16 +10,15 @@ export interface AuthCheckResponse {
   data?: any; // para capturar retorno do backend
 }
 
-// Endpoint público do backend FastAPI para verificação de sessão
-const AUTH_CHECK_URL = `${WEBHOOK_BASE_URL}/auth_check_user`;
+// Endpoint publico do backend FastAPI para verificacao de sessao (backend faz proxy para o webhook)
+const AUTH_CHECK_URL = `${BACKEND_BASE_URL}/auth_check_user`;
 
 export async function checkAuth(): Promise<AuthCheckResponse> {
   try {
-    // ⚠️ Agora não pegamos nada do localStorage.
-    // O cookie HttpOnly é enviado automaticamente.
+    // Cookie HttpOnly vai automaticamente com credentials: include
     const response = await fetch(AUTH_CHECK_URL, {
       method: "GET",
-      credentials: "include", // 🔒 envia o cookie session_id
+      credentials: "include",
     });
 
     if (!response.ok) {
@@ -31,7 +29,6 @@ export async function checkAuth(): Promise<AuthCheckResponse> {
     const data = (await response.json()) as AuthCheckResponse;
     console.log("[AuthCheck]", data);
 
-    // Caso o backend use "valid" como status:
     if (data.status === "valid" || data.status === "success") {
       return { status: "success", user: data.user, data };
     }
