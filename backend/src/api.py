@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, Response, Request, Body, WebSocket  
 from fastapi.middleware.cors import CORSMiddleware  # middleware para liberar CORS
 from pydantic import BaseModel  # criação de DTOs de request/response pydantic
 from contextlib import asynccontextmanager  # gerencia o ciclo de vida (startup/shutdown)
-from typing import Optional  # importa o tipo Optional para permitir tipar campos opcionais sem erro
+from typing import Optional, Any  # importa o tipo Optional para permitir tipar campos opcionais sem erro
 from starlette.websockets import WebSocketState # estados do websocket
 
 from .tratamento_response_IA import inicializar_dispositivos, processar_resposta # lógica de dispositivos
@@ -288,7 +288,8 @@ async def ping():  # endpoint para testar se o backend está online
 # 💬 DTOs para Chat
 # ==========================
 class ChatRequest(BaseModel):
-    comando: str
+    # Permite texto ou payload estruturado vindo do frontend/N8N
+    comando: Any
     origin: Optional[str] = None
 
 # ==========================
@@ -325,9 +326,22 @@ async def chat_message_proxy(request: ChatRequest, raw_request: Request):
 
         # Tenta fazer parse do JSON, se falhar retorna texto puro envelopado
         try:
-            return n8n_response.json()
+            n8n_json = n8n_response.json()
         except json.JSONDecodeError:
             return {"raw_response": n8n_response.text}
+
+        # Executa comandos IoT localmente, se retornados pelo N8N
+        iot_feedback = []
+        try:
+            iot_feedback = await processar_resposta(n8n_json) or []
+        except Exception as e:
+            print(f"⚠️ [CHAT] Falha ao processar resposta IoT: {e}")
+
+        # Envelopa o retorno com feedbacks para o frontend
+        return {
+            "data": n8n_json,
+            "iot_feedback": iot_feedback,
+        }
 
     except Exception as e:
         print(f"[ERRO CHAT] {e}")

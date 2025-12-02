@@ -7,6 +7,7 @@ export interface WebhookResponseNormalized {
   device?: string | null;
   action?: string | null;
   raw?: any;
+  iot_feedback?: any[];
 }
 
 const WEBHOOK_URL = `${BACKEND_BASE_URL}/message_input`;
@@ -41,18 +42,22 @@ export async function sendUserMessage(message: string): Promise<WebhookResponseN
     }
 
     const rawText = await res.text();
-    let data: any = {};
+    let parsed: any = {};
 
     if (rawText.trim().length === 0) {
       console.warn("[DEBUG] Webhook retornou resposta vazia.");
     } else {
       try {
-        data = JSON.parse(rawText);
+        parsed = JSON.parse(rawText);
       } catch (jsonError) {
         console.error("Erro ao converter resposta em JSON:", jsonError);
         throw new Error("Resposta inválida do servidor.");
       }
     }
+
+    // Se o backend envelopar como { data, iot_feedback }, extrai para manter compatibilidade
+    const iot_feedback = Array.isArray(parsed?.iot_feedback) ? parsed.iot_feedback : [];
+    const data = parsed && typeof parsed === "object" && "data" in parsed ? (parsed as any).data : parsed;
 
     console.log("[DEBUG] Resposta bruta da IA:", data);
 
@@ -103,6 +108,7 @@ export async function sendUserMessage(message: string): Promise<WebhookResponseN
       device,
       action,
       raw: data,
+      iot_feedback,
     };
   } catch (error) {
     console.error("Erro ao enviar mensagem:", error);
