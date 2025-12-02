@@ -40,11 +40,17 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 # 🔒 CORS Configuration
+# Se ALLOWED_ORIGINS estiver definido, usa ele. Caso contrário, usa o fallback.
+# Se for definido como "*", libera tudo (não recomendado para produção com credenciais)
 allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
-origins = [origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()]
 
-# Fallback origins if env var is empty
-if not origins:
+if allowed_origins_env == "*":
+    origins = ["*"]
+else:
+    origins = [origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()]
+
+# Fallback origins if env var is empty and not wildcard
+if not origins and allowed_origins_env != "*":
     origins = [
         "https://tcc-iot-frontend-homolog.dlivfa.easypanel.host",
         "http://tcc-iot-frontend-homolog.dlivfa.easypanel.host",
@@ -52,6 +58,8 @@ if not origins:
         "http://localhost:8080",
         "http://localhost:5173", # Vite default
     ]
+
+print(f"✅ [CORS] Origens permitidas: {origins}")
 
 app.add_middleware(
     CORSMiddleware,
