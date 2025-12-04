@@ -64,11 +64,11 @@ const urlToBaseString = (url: URL): string => {
   return pathname && pathname !== "/" ? `${origin}${pathname}` : origin;
 };
 
-const buildFromCandidate = (raw?: string): string | null => {
+const buildFromCandidate = (raw?: string, applyPortFromEnv = true): string | null => {
   const candidate = normalizeToUrl(raw);
   if (!candidate) return null;
   normalizeProtocol(candidate);
-  applyPort(candidate);
+  if (applyPortFromEnv) applyPort(candidate);
   return urlToBaseString(candidate);
 };
 
@@ -82,7 +82,8 @@ const buildFromWindow = (): string | null => {
 };
 
 export const resolveVoiceWsBase = (): string => {
-  const explicit = buildFromCandidate(readEnv("VITE_VOICE_WS_BASE"));
+  // Se VITE_VOICE_WS_BASE vier explícito, não aplicamos porta via env (assume que já está correta)
+  const explicit = buildFromCandidate(readEnv("VITE_VOICE_WS_BASE"), false);
   if (explicit) return explicit;
 
   const backendBase = buildFromCandidate(BACKEND_BASE_URL);
