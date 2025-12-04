@@ -298,6 +298,13 @@ async def chat_message_proxy(request: ChatRequest, raw_request: Request):
         except json.JSONDecodeError:
             return {"raw_response": n8n_response.text}
 
+        # Se for resposta geral, apenas devolve para o frontend sem processar IoT
+        if isinstance(n8n_json, dict) and str(n8n_json.get("type")).lower() == "general":
+            return {
+                "data": n8n_json,
+                "iot_feedback": [],
+            }
+
         # Executa comandos IoT localmente, se retornados pelo N8N
         iot_feedback = []
         try:
