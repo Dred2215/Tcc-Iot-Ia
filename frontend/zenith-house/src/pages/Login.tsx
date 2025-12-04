@@ -30,7 +30,7 @@ const Login = () => {
     if (result.status === "success") {
       console.log("[LOGIN OK] Redirecionando para Home...");
       navigate("/");
-      setTimeout(() => window.location.reload(), 150);
+      // setTimeout(() => window.location.reload(), 150);
     }
 
 

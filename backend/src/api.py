@@ -52,7 +52,8 @@ def parse_bool_env(value: Optional[str]) -> bool:  # converte env string para bo
 # ==========================
 
 N8N_LOGIN_URL = os.getenv("N8N_LOGIN_URL")  # URL final do fluxo de login do n8n
-N8N_AUTH_CHECK_URL = os.getenv("N8N_AUTH_CHECK_URL")  # URL final do fluxo de verificação de sessão no n8n
+# Para testes, usamos o webhook fixo em vez de ler da env
+N8N_AUTH_CHECK_URL = "https://tcc-iot-n8n.dlivfa.easypanel.host/webhook-test/auth_check"
 N8N_LOG_WEBHOOK = os.getenv("N8N_LOG_WEBHOOK")  # webhook de log do n8n
 WEBHOOK_BASE_URL = os.getenv("WEBHOOK_BASE_URL")  # base para compor rotas do n8n
 WEBHOOK_RECEIVE_MESSAGE = (
@@ -65,6 +66,8 @@ if not WEBHOOK_BASE_URL:  # se faltar a base do n8n
     raise RuntimeError("❌ WEBHOOK_BASE_URL não configurado no backend/src/.env")  # aborta startup
 
 WEBHOOK_BASE_URL = WEBHOOK_BASE_URL.rstrip("/")  # remove "/" do final para evitar duplicar barra ao compor rotas
+# Mantém auth-check no mesmo ambiente do login caso precise reverter para env no futuro
+# N8N_AUTH_CHECK_URL = N8N_AUTH_CHECK_URL or f"{WEBHOOK_BASE_URL}/auth_check"
 
 # ==========================
 # ♻️ Ciclo de vida da API
@@ -93,6 +96,7 @@ app = FastAPI(lifespan=lifespan)  # cria o app principal
 dev_origins = [  # origens padrão para desenvolvimento local
     "http://localhost:5173",  # Vite dev server local
     "http://localhost:8080",  # possibilidades comuns de front local
+    "http://localhost:4173"
 ]
 
 env_origins = collect_env_origins()  # coleta todas URLs válidas das envs
@@ -151,12 +155,12 @@ async def login_user(request: Request, response: Response, data: LoginRequest): 
             key="session_id",  # nome do cookie
             value=session_id,  # valor retornado pelo n8n
             httponly=True,  # protege contra acesso JS
-            secure=request.url.scheme == "https",  # só envia em HTTPS se a request do navegador já foi HTTPS
-            samesite="lax",  # permite redirects GET normais sem bloquear cookie
+            secure=True,  # necessário para permitir SameSite=None em requisições cross-site
+            samesite="none",  # permite envio do cookie em chamadas cross-site (frontend ↔ backend)
             max_age=3600,  # dura 1h
         )
 
-        return {"status": "success", "user": result.get("user")}  # retorna login ok para o front
+        return {"status": "success", "user": result.get("user"), "session_id": session_id}  # retorna login ok para o front
 
     except Exception as e:  # se algo inesperado acontecer
         print(f"[ERRO LOGIN PROXY] {e}")  # loga o erro
@@ -170,89 +174,8 @@ async def login_user(request: Request, response: Response, data: LoginRequest): 
 @app.get("/auth_check_user")
 async def auth_check_user(request: Request):  # endpoint para validar cookie de sessão
     try:
-        session_id = request.cookies.get("session_id")  # pega o cookie enviado pelo navegador
-        print(f"[AUTH CHECK] Cookie recebido: {session_id}")  # loga valor do cookie
-
-        if not session_id:  # se não houver cookie
-            raise HTTPException(status_code=401, detail="❌ Cookie de sessão ausente")  # 401: não autenticado
-
-        async with httpx.AsyncClient(timeout=10.0) as client:  # cria cliente HTTP assíncrono
-            n8n_response = await client.get(
-                f"{N8N_AUTH_CHECK_URL}?session_id={session_id}"  # chama a URL de validação do n8n com o parâmetro de sessão
-            )
-
-        # Tenta decodificar o retorno para extrair mensagens e dados do usuário
-        raw_text = n8n_response.text
-        try:
-            n8n_data = n8n_response.json()
-        except json.JSONDecodeError:
-            n8n_data = None
-
-        if n8n_response.status_code != 200:  # se sessão inválida
-            print(
-                f"[AUTH CHECK] N8N respondeu {n8n_response.status_code}: {raw_text}"
-            )
-            detail_msg = None
-            if isinstance(n8n_data, dict):
-                detail_msg = n8n_data.get("message") or n8n_data.get("detail")
-            raise HTTPException(
-                status_code=n8n_response.status_code,
-                detail=detail_msg or raw_text or "Sessão inválida/expirada no n8n",
-            )
-
-        if n8n_data is None:
-            print("[AUTH CHECK] Retorno do n8n não é JSON válido")
-            raise HTTPException(status_code=502, detail="Resposta inválida do n8n")
-
-        # Alguns fluxos retornam {"status": "success", ...}; se vier outro status tratamos como sessão inválida
-        n8n_status = ""
-        n8n_message = ""
-        login_ok = False
-        if isinstance(n8n_data, dict):
-            n8n_status = str(n8n_data.get("status") or "").lower()
-            n8n_message = str(n8n_data.get("message") or "").strip().lower()
-            login_ok = n8n_message == "login ok"
-
-            # Considera válido se status for success/valid/ok ou se a mensagem explícita for "Login OK"
-            is_valid = (n8n_status in {"success", "valid", "ok"}) or (n8n_message == "login ok")
-
-            # Se vier algum status/mensagem conhecida e não bater com o esperado, considera sessão inválida
-            if (n8n_status or n8n_message) and not is_valid:
-                raise HTTPException(
-                    status_code=401,
-                    detail=n8n_data.get("message") or "Sessão inválida/expirada no n8n",
-                )
-
-        # Normaliza o usuário vindo do n8n, removendo campos sensíveis
-        user_data = None
-        if isinstance(n8n_data, list) and n8n_data:
-            user_data = n8n_data[0]
-        elif isinstance(n8n_data, dict):
-            user_data = n8n_data.get("user") or n8n_data.get("data")
-            if not user_data and any(k in n8n_data for k in ("id", "email", "full_name", "phone")):
-                user_data = {
-                    "id": n8n_data.get("id"),
-                    "full_name": n8n_data.get("full_name"),
-                    "email": n8n_data.get("email"),
-                    "phone": n8n_data.get("phone"),
-                }
-
-        if isinstance(user_data, dict):
-            user_data = {
-                k: v
-                for k, v in user_data.items()
-                if k not in {"password_hash", "password", "senha"}
-            }
-
-        if not user_data:
-            print("[AUTH CHECK] Sessão válida, mas n8n não retornou dados de usuário.")
-
-        return {
-            "status": "success" if (n8n_status in {"success", "ok"} or login_ok) else "valid",
-            "user": user_data,
-            "session_id": n8n_data.get("session_id") if isinstance(n8n_data, dict) else session_id,
-            "data": n8n_data,
-        }  # retorna sessão válida
+        # Para teste: apenas responde um ping local, sem chamar n8n
+        return {"status": "success", "message": "auth check ping ok"}
 
     except HTTPException:
         # Propaga erros HTTP já tratados acima (inclusive 4xx do n8n)
@@ -260,7 +183,6 @@ async def auth_check_user(request: Request):  # endpoint para validar cookie de 
     except Exception as e:  # se houver falha na request ao n8n
         print(f"[ERRO AUTH CHECK] {e}")  # loga erro
         raise HTTPException(status_code=500, detail="Erro interno ao validar sessão")  # devolve 500
-
 
 # ==========================
 # 🎙️ Endpoint: Envia comando de voz em texto reconhecido

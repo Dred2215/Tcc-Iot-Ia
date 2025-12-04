@@ -1,3 +1,5 @@
+import { BACKEND_BASE_URL } from "@/services/backend_config";
+
 const PROTOCOL_REGEX = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//;
 
 const readEnv = (key: string): string | undefined => {
@@ -83,7 +85,7 @@ export const resolveVoiceWsBase = (): string => {
   const explicit = buildFromCandidate(readEnv("VITE_VOICE_WS_BASE"));
   if (explicit) return explicit;
 
-  const backendBase = buildFromCandidate(readEnv("VITE_BACKEND_BASE_URL"));
+  const backendBase = buildFromCandidate(BACKEND_BASE_URL);
   if (backendBase) return backendBase;
 
   const browserBase = buildFromWindow();
