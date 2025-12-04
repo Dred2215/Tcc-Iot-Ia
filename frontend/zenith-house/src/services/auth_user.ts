@@ -6,6 +6,8 @@ if (!backendBaseUrl) {
 export interface AuthCheckResponse {
   status: "success" | "error" | "valid" | string;
   message?: string;
+  type?: string;
+  session_id?: string;
   user?: {
     id: string;
     email: string;
@@ -32,7 +34,23 @@ export async function checkAuth(): Promise<AuthCheckResponse> {
     const data = (await response.json()) as AuthCheckResponse;
     console.log("[AuthCheck]", data);
 
-    return { status: "success", user: data.user, data };
+    // Normaliza dados possivelmente aninhados (data.data)
+    const nested = (data as any)?.data || {};
+    const deepNested = (nested as any)?.data || {};
+    const resolvedType = data.type ?? nested.type ?? deepNested.type;
+    const resolvedUser = data.user ?? nested.user ?? deepNested.user;
+    const resolvedSession = data.session_id ?? nested.session_id ?? deepNested.session_id;
+    const resolvedStatus = data.status ?? nested.status ?? deepNested.status ?? "success";
+    const resolvedMessage = data.message ?? nested.message ?? deepNested.message;
+
+    return {
+      status: resolvedStatus,
+      message: resolvedMessage,
+      type: resolvedType,
+      session_id: resolvedSession,
+      user: resolvedUser,
+      data,
+    };
   } catch (err: any) {
     console.error("[AuthCheck Error]", err);
     return { status: "error", message: err.message || "Network error" };

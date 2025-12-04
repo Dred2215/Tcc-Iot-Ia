@@ -5,6 +5,7 @@ export interface LoginResponse {
   status: "success" | "error" | string;
   message?: string;
   session_id?: string;
+  type?: string;
   user?: {
     id: string;
     email: string;

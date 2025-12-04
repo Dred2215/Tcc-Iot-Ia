@@ -48,6 +48,21 @@ def parse_bool_env(value: Optional[str]) -> bool:  # converte env string para bo
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}  # retorna True se o valor indicar positivo
 
 # ==========================
+# 📝 Helper de logging padronizado
+# ==========================
+
+def log_event(tag: str, text: str, level: str = "INFO", **context: Any) -> None:
+    """
+    Imprime logs padronizados com nível, tag e contexto serializado.
+    """
+    safe_context = {k: v for k, v in context.items() if v is not None}
+    try:
+        ctx_text = f" | {json.dumps(safe_context, ensure_ascii=False, default=str)}" if safe_context else ""
+    except Exception:
+        ctx_text = f" | {safe_context}"
+    print(f"[{level}] [{tag}] {text}{ctx_text}")
+
+# ==========================
 # 🧭 Variáveis de ambiente do projeto
 # ==========================
 
@@ -76,17 +91,17 @@ WEBHOOK_BASE_URL = WEBHOOK_BASE_URL.rstrip("/")  # remove "/" do final para evit
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # gerencia startup e shutdown
-    print("🔄 [STARTUP] Servidor FastAPI iniciando...")  # loga início do servidor
-    print(f"[ENV] Webhook Base URL configurado: {WEBHOOK_BASE_URL}")  # valida leitura da variável
+    log_event("STARTUP", "Servidor FastAPI iniciando...")
+    log_event("STARTUP", "Webhook Base URL configurado", base_url=WEBHOOK_BASE_URL)
     
     # Inicializa dispositivos Tuya
     try:
         inicializar_dispositivos()
     except Exception as e:
-        print(f"⚠️ [STARTUP] Erro ao inicializar dispositivos: {e}")
+        log_event("STARTUP", "Erro ao inicializar dispositivos", level="WARN", error=str(e))
 
     yield  # entrega execução para o app rodar
-    print("🛑 [SHUTDOWN] Servidor FastAPI finalizando...")  # loga encerramento
+    log_event("SHUTDOWN", "Servidor FastAPI finalizando...")
 
 app = FastAPI(lifespan=lifespan)  # cria o app principal
 
@@ -97,14 +112,15 @@ app = FastAPI(lifespan=lifespan)  # cria o app principal
 dev_origins = [  # origens padrão para desenvolvimento local
     "http://localhost:5173",  # Vite dev server local
     "http://localhost:8080",  # possibilidades comuns de front local
-    "http://localhost:4173"
+    "http://localhost:4173",
+    "http://localhost:8000"
 ]
 
 env_origins = collect_env_origins()  # coleta todas URLs válidas das envs
 
 final_origins = sorted({*dev_origins, *env_origins})  # une localhosts + origins do .env
 
-print(f"[CORS] Origens permitidas para chamadas externas: {final_origins}")  # loga para debug
+log_event("CORS", "Origens permitidas configuradas", origins=final_origins)
 
 app.add_middleware(
     CORSMiddleware,  # ativa middleware de CORS
@@ -133,7 +149,7 @@ class LoginRequest(BaseModel):  # modelo esperado no login
 async def login_user(request: Request, response: Response, data: LoginRequest):  # endpoint que faz proxy de login para o n8n
     try:
         login_url = f"{WEBHOOK_BASE_URL}/login_user_webhook"  # compõe URL correta do n8n usando a base definida
-        print(f"[LOGIN] → Chamando fluxo do n8n em {login_url}")  # loga a URL chamada
+        log_event("LOGIN", "Chamando fluxo do n8n", url=login_url, email=data.email)
 
         async with httpx.AsyncClient(timeout=10.0) as client:  # cria cliente HTTP assíncrono
             n8n_response = await client.post(
@@ -142,12 +158,17 @@ async def login_user(request: Request, response: Response, data: LoginRequest): 
             )
 
         if n8n_response.status_code != 200:  # se a autenticação falhar
+            log_event("LOGIN", "Credenciais inválidas no fluxo do n8n", level="WARN", status_code=n8n_response.status_code)
             raise HTTPException(status_code=401, detail="❌ Credenciais inválidas no fluxo do n8n")  # devolve 401 ao cliente
 
         result = n8n_response.json()  # converte resposta do n8n em JSON
         session_id = result.get("session_id")  # extrai ID de sessão retornado
+        user_type = result.get("type")  # tipo de usuário retornado pelo n8n (admin/client)
+        status_value = result.get("status") or "success"  # status padronizado vindo do n8n
+        message_value = result.get("message")  # mensagem de retorno do fluxo
 
         if not session_id:  # se não retornou session_id
+            log_event("LOGIN", "session_id não retornado pelo n8n", level="WARN", response=result)
             raise HTTPException(status_code=401, detail="❌ session_id não retornado pelo n8n")  # aborta request
 
         # salva o session_id como cookie seguro no navegador
@@ -161,10 +182,18 @@ async def login_user(request: Request, response: Response, data: LoginRequest): 
             max_age=3600,  # dura 1h
         )
 
-        return {"status": "success", "user": result.get("user"), "session_id": session_id}  # retorna login ok para o front
+        log_event("LOGIN", "Login OK", status=status_value, user_type=user_type, user=result.get("user"))
+
+        return {
+            "status": status_value,
+            "message": message_value,
+            "type": user_type,
+            "session_id": session_id,
+            "user": result.get("user"),
+        }  # retorna login ok para o front
 
     except Exception as e:  # se algo inesperado acontecer
-        print(f"[ERRO LOGIN PROXY] {e}")  # loga o erro
+        log_event("LOGIN", "Erro inesperado no proxy de login", level="ERROR", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))  # devolve 500 ao cliente
 
 
@@ -184,9 +213,16 @@ async def auth_check_user(request: Request):  # endpoint para validar cookie de 
         query_session = request.query_params.get("session_id")
 
         session_id = cookie_session or header_session or query_session
-        print(f"[AUTH CHECK] session_id recebido. Cookie: {cookie_session}, Header: {header_session}, Query: {query_session}")
+        log_event(
+            "AUTH_CHECK",
+            "Session recebida para validação",
+            cookie=cookie_session,
+            header=header_session,
+            query=query_session,
+        )
 
         if not session_id:
+            log_event("AUTH_CHECK", "Session ausente", level="WARN")
             raise HTTPException(status_code=401, detail="❌ Cookie de sessão ausente")
 
         # Envia session_id ao webhook do n8n para validação
@@ -211,18 +247,19 @@ async def auth_check_user(request: Request):  # endpoint para validar cookie de 
 
         # Loga status e message retornados pelo n8n para debug
         if isinstance(data, dict):
-            print(f"[AUTH CHECK] n8n status: {data.get('status')} message: {data.get('message')}")
+            log_event("AUTH_CHECK", "Resposta n8n", status=data.get("status"), message=data.get("message"))
 
         if n8n_response.status_code >= 400:
             raise HTTPException(status_code=n8n_response.status_code, detail=data)
 
+        log_event("AUTH_CHECK", "Sessão validada com sucesso", status=data.get("status") if isinstance(data, dict) else None)
         return data
 
     except HTTPException:
         # Propaga erros HTTP já tratados acima (inclusive 4xx do n8n)
         raise
     except Exception as e:  # se houver falha na request ao n8n
-        print(f"[ERRO AUTH CHECK] {e}")  # loga erro
+        log_event("AUTH_CHECK", "Erro interno ao validar sessão", level="ERROR", error=str(e))
         raise HTTPException(status_code=500, detail="Erro interno ao validar sessão")  # devolve 500
 
 # ==========================
@@ -232,10 +269,10 @@ async def auth_check_user(request: Request):  # endpoint para validar cookie de 
 @app.post("/voice_command")
 async def voice_command(req: VoiceCommand):  # endpoint que recebe texto final de voz
     try:
-        print(f"[🎙️VOZ] Comando final recebido: {req.message}")  # loga input de voz
+        log_event("VOICE_CMD", "Comando de voz recebido", message=req.message)
         return {"status": "ok"}  # resposta simples de ping para o front
     except Exception as e:
-        print(f"[ERRO VOZ] {e}")  # loga erro
+        log_event("VOICE_CMD", "Erro ao processar comando de voz", level="ERROR", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))  # retorna erro 500
 
 # ==========================
@@ -244,6 +281,7 @@ async def voice_command(req: VoiceCommand):  # endpoint que recebe texto final d
 
 @app.get("/ping")
 async def ping():  # endpoint para testar se o backend está online
+    log_event("PING", "Healthcheck solicitado")
     return {"message": "Backend está online 🚀"}  # indica que o backend está respondendo corretamente
 
 
@@ -265,7 +303,7 @@ async def chat_message_proxy(request: ChatRequest, raw_request: Request):
     """
     try:
         webhook_url = f"{WEBHOOK_BASE_URL}/message_input"
-        print(f"[CHAT] → Encaminhando mensagem para N8N em {webhook_url}")
+        log_event("CHAT", "Encaminhando mensagem para N8N", url=webhook_url)
 
         # Tenta descobrir a origem: primeiro do body, depois do header
         origin = request.origin or raw_request.headers.get("x-origin") or raw_request.headers.get("origin")
@@ -289,7 +327,7 @@ async def chat_message_proxy(request: ChatRequest, raw_request: Request):
             )
         
         if n8n_response.status_code != 200:
-            print(f"⚠️ [CHAT] Erro N8N: {n8n_response.text}")
+            log_event("CHAT", "Erro retornado pelo N8N", level="WARN", status_code=n8n_response.status_code, body=n8n_response.text)
             raise HTTPException(status_code=n8n_response.status_code, detail="Erro ao processar mensagem no N8N")
 
         # Tenta fazer parse do JSON, se falhar retorna texto puro envelopado
@@ -310,7 +348,9 @@ async def chat_message_proxy(request: ChatRequest, raw_request: Request):
         try:
             iot_feedback = await processar_resposta(n8n_json) or []
         except Exception as e:
-            print(f"⚠️ [CHAT] Falha ao processar resposta IoT: {e}")
+            log_event("CHAT", "Falha ao processar resposta IoT", level="WARN", error=str(e))
+        else:
+            log_event("CHAT", "Processamento IoT concluído", feedbacks=len(iot_feedback))
 
         # Envelopa o retorno com feedbacks para o frontend
         return {
@@ -319,7 +359,7 @@ async def chat_message_proxy(request: ChatRequest, raw_request: Request):
         }
 
     except Exception as e:
-        print(f"[ERRO CHAT] {e}")
+        log_event("CHAT", "Erro interno ao processar chat", level="ERROR", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -334,31 +374,32 @@ async def websocket_ping(websocket: WebSocket):
     """
     await websocket.accept()
     try:
+        log_event("WS_PING", "Cliente conectado")
         await websocket.send_text("conectado")
         while True:
             data = await websocket.receive_text()
             await websocket.send_text(f"echo: {data}")
     except Exception as e:
-        print(f"⚠️ [WS-PING] Erro ou desconexão: {e}")
+        log_event("WS_PING", "Erro ou desconexão", level="WARN", error=str(e))
     finally:
         if websocket.application_state != WebSocketState.DISCONNECTED:
             await websocket.close()
-        print("🔌 [WS-PING] Conexão encerrada.")
+        log_event("WS_PING", "Conexão encerrada")
 
 
 @app.websocket("/ws-hotword")
 async def websocket_hotword(websocket: WebSocket):
     await websocket.accept()
-    print("👂 [HOTWORD] Cliente conectado")
+    log_event("WS_HOTWORD", "Cliente conectado")
     await websocket.send_text("✅ Detector ativo. Diga 'bob' para iniciar comando.")
 
     try:
         while True:
             data = await websocket.receive_text()
-            print(f"📩 [HOTWORD] Recebido: {data}")
+            log_event("WS_HOTWORD", "Mensagem recebida", payload=data)
 
             if "bob" in data.lower():
-                print("🎯 [HOTWORD] Hotword detectada — encerrando conexão.")
+                log_event("WS_HOTWORD", "Hotword detectada, encerrando conexão")
                 await websocket.send_text("🚀 Hotword detectada: 'bob'")
                 await asyncio.sleep(0.3)
                 break
@@ -366,12 +407,12 @@ async def websocket_hotword(websocket: WebSocket):
                 await websocket.send_text("🗣️ Aguardando hotword...")
 
     except Exception as e:
-        print(f"⚠️ [HOTWORD] Erro ou desconexão: {e}")
+        log_event("WS_HOTWORD", "Erro ou desconexão", level="WARN", error=str(e))
 
     finally:
         if websocket.application_state != WebSocketState.DISCONNECTED:
             await websocket.close()
-        print("🔌 [HOTWORD] Conexão encerrada.")
+        log_event("WS_HOTWORD", "Conexão encerrada")
 
 
 # ======================================================
@@ -385,7 +426,7 @@ async def websocket_voice(websocket: WebSocket):
     o tratamento_response_IA.py, que executa o comando nos dispositivos.
     """
     await websocket.accept()
-    print("🎤 [VOICE] Cliente conectado")
+    log_event("WS_VOICE", "Cliente conectado")
     await websocket.send_text("🟢 Conexão de voz estabelecida com o servidor.")
 
     try:
@@ -393,7 +434,7 @@ async def websocket_voice(websocket: WebSocket):
             while True:
                 # 🗣️ Recebe mensagem do frontend
                 data = await websocket.receive_text()
-                print(f"📩 [VOICE] Mensagem recebida: {data}")
+                log_event("WS_VOICE", "Mensagem recebida", payload=data)
 
                 if not WEBHOOK_RECEIVE_MESSAGE:
                     await websocket.send_text("⚠️ Nenhum webhook configurado no servidor (WEBHOOK_RECEIVE_MESSAGE).")
@@ -419,7 +460,12 @@ async def websocket_voice(websocket: WebSocket):
                             response_json = await resp.json(content_type=None)
                             resposta_formatada = json.dumps(response_json, indent=2, ensure_ascii=False)
 
-                            print(f"📤 [WEBHOOK] Status {resp.status} | Resposta JSON:\n{resposta_formatada}")
+                            log_event(
+                                "WS_VOICE",
+                                "Resposta JSON recebida do webhook",
+                                status=resp.status,
+                                response=response_json,
+                            )
                             await websocket.send_text(
                                 f"✅ Resposta do webhook ({resp.status}): {resposta_formatada}"
                             )
@@ -439,25 +485,25 @@ async def websocket_voice(websocket: WebSocket):
                         except Exception:
                             # Caso o retorno não seja JSON, envia texto cru
                             response_text = await resp.text()
-                            print(f"📤 [WEBHOOK] Status {resp.status} | Texto:\n{response_text}")
+                            log_event("WS_VOICE", "Resposta texto recebida do webhook", status=resp.status, response=response_text)
                             await websocket.send_text(
                                 f"✅ Resposta do webhook ({resp.status}): {response_text}"
                             )
 
                 except asyncio.TimeoutError:
-                    print("⏰ [WEBHOOK] Timeout ao enviar mensagem.")
+                    log_event("WS_VOICE", "Timeout ao enviar mensagem ao webhook", level="WARN")
                     await websocket.send_text("⚠️ O webhook demorou para responder.")
                 except Exception as e:
-                    print(f"⚠️ [WEBHOOK] Erro ao enviar: {e}")
+                    log_event("WS_VOICE", "Erro ao enviar mensagem ao webhook", level="ERROR", error=str(e))
                     await websocket.send_text(f"⚠️ Erro ao enviar para o webhook: {e}")
 
     except Exception as e:
-        print(f"⚠️ [VOICE] Erro ou desconexão: {e}")
+        log_event("WS_VOICE", "Erro ou desconexão", level="WARN", error=str(e))
 
     finally:
         if websocket.application_state != WebSocketState.DISCONNECTED:
             await websocket.close()
-        print("🔌 [VOICE] Conexão encerrada.")
+        log_event("WS_VOICE", "Conexão encerrada")
 
 
 if __name__ == "__main__":
