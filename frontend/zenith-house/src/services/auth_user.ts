@@ -15,7 +15,7 @@ const AUTH_CHECK_URL = `${BACKEND_BASE_URL}/auth_check_user`;
 
 export async function checkAuth(): Promise<AuthCheckResponse> {
   try {
-    // Para este teste, apenas chamamos o backend (ping) e confiamos no status HTTP
+    // Chamada ao backend confiando no cookie HttpOnly enviado pelo backend
     const response = await fetch(AUTH_CHECK_URL, {
       method: "GET",
       credentials: "include",

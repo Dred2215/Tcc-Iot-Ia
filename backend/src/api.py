@@ -53,7 +53,7 @@ def parse_bool_env(value: Optional[str]) -> bool:  # converte env string para bo
 
 N8N_LOGIN_URL = os.getenv("N8N_LOGIN_URL")  # URL final do fluxo de login do n8n
 # Para testes, usamos o webhook fixo em vez de ler da env
-N8N_AUTH_CHECK_URL = "https://tcc-iot-n8n.dlivfa.easypanel.host/webhook-test/auth_check"
+N8N_AUTH_CHECK = os.getenv("N8N_AUTH_CHECK")
 N8N_LOG_WEBHOOK = os.getenv("N8N_LOG_WEBHOOK")  # webhook de log do n8n
 WEBHOOK_BASE_URL = os.getenv("WEBHOOK_BASE_URL")  # base para compor rotas do n8n
 WEBHOOK_RECEIVE_MESSAGE = (
@@ -174,8 +174,48 @@ async def login_user(request: Request, response: Response, data: LoginRequest): 
 @app.get("/auth_check_user")
 async def auth_check_user(request: Request):  # endpoint para validar cookie de sessão
     try:
-        # Para teste: apenas responde um ping local, sem chamar n8n
-        return {"status": "success", "message": "auth check ping ok"}
+        # Coleta session_id de cookie, header ou query para teste
+        cookie_session = request.cookies.get("session_id")
+        header_session = (request.headers.get("x-session-id") or "").strip()
+        raw_auth = (request.headers.get("authorization") or "").strip()
+        if not header_session and raw_auth:
+            header_session = raw_auth.split(" ", 1)[1].strip() if raw_auth.lower().startswith("bearer ") else raw_auth
+        query_session = request.query_params.get("session_id")
+
+        session_id = cookie_session or header_session or query_session
+        print(f"[AUTH CHECK] session_id recebido. Cookie: {cookie_session}, Header: {header_session}, Query: {query_session}")
+
+        if not session_id:
+            raise HTTPException(status_code=401, detail="❌ Cookie de sessão ausente")
+
+        # Envia session_id ao webhook do n8n para validação
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            n8n_response = await client.get(
+                N8N_AUTH_CHECK,
+                params={"session_id": session_id},
+                headers={"X-Session-Id": session_id},
+                cookies={"session_id": session_id},
+            )
+
+        # Propaga status/corpo do n8n para o frontend
+        content_type = n8n_response.headers.get("content-type", "")
+        data = None
+        if "application/json" in content_type:
+            try:
+                data = n8n_response.json()
+            except json.JSONDecodeError:
+                data = {"raw": n8n_response.text}
+        else:
+            data = {"raw": n8n_response.text}
+
+        # Loga status e message retornados pelo n8n para debug
+        if isinstance(data, dict):
+            print(f"[AUTH CHECK] n8n status: {data.get('status')} message: {data.get('message')}")
+
+        if n8n_response.status_code >= 400:
+            raise HTTPException(status_code=n8n_response.status_code, detail=data)
+
+        return data
 
     except HTTPException:
         # Propaga erros HTTP já tratados acima (inclusive 4xx do n8n)
