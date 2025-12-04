@@ -1,7 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Mic, Square } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { buildVoiceWsUrl } from "@/lib/voiceWs";
+
+const WS_BASE = (import.meta.env.VITE_VOICE_WS_BASE as string)?.replace(/\/$/, "");
+if (!WS_BASE) {
+  throw new Error("VITE_VOICE_WS_BASE não configurada");
+}
+const buildVoiceWsUrl = (path: string): string => {
+  const finalPath = path.startsWith("/") ? path : `/${path}`;
+  return `${WS_BASE}${finalPath}`;
+};
 
 type WebhookPayload =
   | {
@@ -93,6 +101,7 @@ const Voice_STT_Test = () => {
   const isCommandMode = useRef(false);
   const commandText = useRef("");
   const commandTimer = useRef<any>(null);
+  const pingSocketRef = useRef<WebSocket | null>(null);
 
   // ⏱️ Timer de 10s após detectar "bob"
   const commandStartTimer = () => {
@@ -193,20 +202,49 @@ const Voice_STT_Test = () => {
 
 
     recognitionRef.current = recognition;
+    connectPing();
     connectSocket();
     recognition.start();
 
     return () => {
       recognition.stop();
       socketRef.current?.close();
+      pingSocketRef.current?.close();
     };
   }, []);
+
+  // =====================================================
+  // 🔌 WebSocket de Ping (verifica conectividade)
+  // =====================================================
+  const connectPing = () => {
+    const ws = new WebSocket(`${WS_BASE}/ws-ping`);
+
+    ws.onopen = () => {
+      console.log("🔗 [PING] Conectado ao servidor");
+    };
+
+    ws.onmessage = (e) => {
+      console.log("📩 [PING]", e.data);
+      setStatusMessage(e.data);
+    };
+
+    ws.onclose = () => {
+      console.log("🔌 [PING] Conexão encerrada.");
+      pingSocketRef.current = null;
+    };
+
+    ws.onerror = (e) => {
+      console.error("⚠️ [PING] Erro", e);
+    };
+
+    pingSocketRef.current = ws;
+  };
 
   // =====================================================
   // 🔌 WebSocket Único
   // =====================================================
   const connectSocket = () => {
-    const ws = new WebSocket(buildVoiceWsUrl("/ws-hotword"));
+    const ws = new WebSocket(`${WS_BASE}/ws-hotword`);
 
     ws.onopen = () => {
       console.log("👂 [HOTWORD] Conectado ao servidor");
@@ -237,7 +275,7 @@ const Voice_STT_Test = () => {
   // 🔌 WebSocket de Comando (VOICE)
   // =====================================================
   const sendVoiceCommand = (text: string) => {
-    const ws = new WebSocket(buildVoiceWsUrl("/ws-voice"));
+    const ws = new WebSocket(`${WS_BASE}/ws-voice`);
 
     ws.onopen = () => {
       console.log("🎤 [VOICE] Conectado ao servidor.");

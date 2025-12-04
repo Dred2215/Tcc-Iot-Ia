@@ -313,6 +313,26 @@ async def chat_message_proxy(request: ChatRequest, raw_request: Request):
 # ======================================================
 # 👂 WebSocket HOTWORD (aguarda "bob" e encerra)
 # ======================================================
+@app.websocket("/ws-ping")
+async def websocket_ping(websocket: WebSocket):
+    """
+    WebSocket simples de ping/pong para testar conectividade.
+    Envia uma mensagem de confirmação na conexão e ecoa mensagens recebidas.
+    """
+    await websocket.accept()
+    try:
+        await websocket.send_text("conectado")
+        while True:
+            data = await websocket.receive_text()
+            await websocket.send_text(f"echo: {data}")
+    except Exception as e:
+        print(f"⚠️ [WS-PING] Erro ou desconexão: {e}")
+    finally:
+        if websocket.application_state != WebSocketState.DISCONNECTED:
+            await websocket.close()
+        print("🔌 [WS-PING] Conexão encerrada.")
+
+
 @app.websocket("/ws-hotword")
 async def websocket_hotword(websocket: WebSocket):
     await websocket.accept()
