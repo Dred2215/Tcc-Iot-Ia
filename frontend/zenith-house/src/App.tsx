@@ -8,8 +8,6 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Home from "./pages/Home";
 import Register from "./pages/Register";
 import Text from "./pages/Text";
-import Voice from "./pages/Voice";
-import WebVoice from "./pages/Voice";
 import Voice_STT_Test from "./pages/WebVoice_test"; // ✅ Novo componente STT
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
@@ -26,8 +24,6 @@ const App = () => (
           <Route path="/" element={<Home />} />
           <Route path="/register" element={<Register />} />
           <Route path="/text" element={<Text />} />
-          <Route path="/voice" element={<Voice />} />
-          <Route path="/webvoice" element={<WebVoice />} />
           <Route path="/webvoice_test" element={<Voice_STT_Test />} /> {/* ✅ Substituído */}
           <Route path="/login" element={<Login />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
