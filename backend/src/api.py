@@ -56,6 +56,7 @@ N8N_LOGIN_URL = os.getenv("N8N_LOGIN_URL")  # URL final do fluxo de login do n8n
 N8N_AUTH_CHECK = os.getenv("N8N_AUTH_CHECK")
 N8N_LOG_WEBHOOK = os.getenv("N8N_LOG_WEBHOOK")  # webhook de log do n8n
 WEBHOOK_BASE_URL = os.getenv("WEBHOOK_BASE_URL")  # base para compor rotas do n8n
+WEBHOOK_TEST_BASE_URL = os.getenv("WEBHOOK_TEST_BASE_URL")  # base de testes para compor rotas do n8n
 WEBHOOK_RECEIVE_MESSAGE = (
     os.getenv("VITE_WEBHOOK_MESSAGE_CHAT_RESPONSE")
     or os.getenv("WEBHOOK_MESSAGE_CHAT_RESPONSE")
@@ -263,7 +264,7 @@ async def chat_message_proxy(request: ChatRequest, raw_request: Request):
     Recebe a mensagem de texto do frontend e encaminha para o webhook do N8N.
     """
     try:
-        webhook_url = f"{WEBHOOK_BASE_URL}/message_input"
+        webhook_url = f"{WEBHOOK_TEST_BASE_URL}/message_input"
         print(f"[CHAT] → Encaminhando mensagem para N8N em {webhook_url}")
 
         # Tenta descobrir a origem: primeiro do body, depois do header
@@ -397,7 +398,7 @@ async def websocket_voice(websocket: WebSocket):
                     # 🚀 Envia a mensagem ao webhook
                     # Ajustado para usar "comando" para consistência com o módulo de texto
                     async with session.post(
-                        WEBHOOK_RECEIVE_MESSAGE,
+                        WEBHOOK_TEST_BASE_URL,
                         json={
                             "comando": data,
                             "origin": "voice_module",

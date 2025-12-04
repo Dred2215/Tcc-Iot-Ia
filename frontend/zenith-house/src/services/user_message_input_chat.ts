@@ -11,7 +11,7 @@ export interface WebhookResponseNormalized {
 }
 
 const WEBHOOK_URL = `${BACKEND_BASE_URL}/message_input`;
-const MESSAGE_ORIGIN = "prod-origin";
+const MESSAGE_ORIGIN = "chat_module";
 
 const getContentMessageText = (content: unknown): string | null => {
   if (!content) return null;
