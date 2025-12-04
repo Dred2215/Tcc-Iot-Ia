@@ -268,11 +268,16 @@ async def chat_message_proxy(request: ChatRequest, raw_request: Request):
 
         # Tenta descobrir a origem: primeiro do body, depois do header
         origin = request.origin or raw_request.headers.get("x-origin") or raw_request.headers.get("origin")
+        session_id = raw_request.cookies.get("session_id") or raw_request.headers.get("x-session-id")
         payload = {"comando": request.comando}
         if origin:
             payload["origin"] = origin
+        if session_id:
+            payload["session_id"] = session_id
 
         headers = {"X-Origin": origin} if origin else {}
+        if session_id:
+            headers["X-Session-Id"] = session_id
 
         # Encaminha para o N8N com cabeçalho opcional de origem
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -386,12 +391,19 @@ async def websocket_voice(websocket: WebSocket):
                     await websocket.send_text("⚠️ Nenhum webhook configurado no servidor (WEBHOOK_RECEIVE_MESSAGE).")
                     continue
 
+                session_id = websocket.cookies.get("session_id") or ""
+
                 try:
                     # 🚀 Envia a mensagem ao webhook
                     # Ajustado para usar "comando" para consistência com o módulo de texto
                     async with session.post(
                         WEBHOOK_RECEIVE_MESSAGE,
-                        json={"comando": data, "origin": "voice_module"},
+                        json={
+                            "comando": data,
+                            "origin": "voice_module",
+                            "session_id": session_id or None,
+                        },
+                        headers={"X-Session-Id": session_id} if session_id else None,
                         timeout=15,
                     ) as resp:
                         try:
