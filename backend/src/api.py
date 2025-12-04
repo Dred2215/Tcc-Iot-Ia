@@ -417,6 +417,10 @@ async def websocket_voice(websocket: WebSocket):
                                 f"✅ Resposta do webhook ({resp.status}): {resposta_formatada}"
                             )
 
+                            # Se o tipo for "general", apenas devolve a resposta do agente e não tenta processar comando
+                            if isinstance(response_json, dict) and str(response_json.get("type")).lower() == "general":
+                                continue
+
                             # ⚙️ Envia resposta para tratamento e execução local
                             feedbacks = await processar_resposta(response_json)
                             if feedbacks:
