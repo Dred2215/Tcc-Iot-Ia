@@ -1,5 +1,6 @@
 const DEFAULT_WEBHOOK_BASE_URL = "https://tcc-iot-n8n.dlivfa.easypanel.host/webhook";
 const DEFAULT_WEBHOOK_TEST_BASE_URL = "https://tcc-iot-n8n.dlivfa.easypanel.host/webhook-test";
+const DEFAULT_REMOTE_BACKEND = "https://tcc-iot-backend-homolog.dlivfa.easypanel.host";
 const DEFAULT_LOCAL_BACKEND = "http://localhost:8000";
 const DEV_SERVER_PORTS = new Set(["5173", "4173", "4174", "3000"]);
 
@@ -25,6 +26,9 @@ const resolveBackendBaseFromWindow = (): string | undefined => {
   const { protocol, hostname, port } = window.location;
   if (!protocol || !hostname) return undefined;
 
+  // Evita usar o host do frontend em produção (ex: tcc-iot-frontend-*)
+  if (hostname.includes("frontend")) return undefined;
+
   const desiredPort = DEV_SERVER_PORTS.has(port ?? "")
     ? readEnv("VITE_LOCAL_BACKEND_PORT") ?? "8000"
     : port;
@@ -35,6 +39,7 @@ const resolveBackendBaseFromWindow = (): string | undefined => {
 const rawBackendBase =
   readEnv("VITE_BACKEND_BASE_URL") ??
   resolveBackendBaseFromWindow() ??
+  DEFAULT_REMOTE_BACKEND ??
   DEFAULT_LOCAL_BACKEND;
 
 export const BACKEND_BASE_URL = trimTrailingSlashes(rawBackendBase);
