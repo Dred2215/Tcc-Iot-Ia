@@ -391,7 +391,7 @@ async def websocket_voice(websocket: WebSocket):
                     # Ajustado para usar "comando" para consistência com o módulo de texto
                     async with session.post(
                         WEBHOOK_RECEIVE_MESSAGE,
-                        json={"comando": data},
+                        json={"comando": data, "origin": "voice_module"},
                         timeout=15,
                     ) as resp:
                         try:
