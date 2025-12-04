@@ -1,4 +1,7 @@
-import { BACKEND_BASE_URL } from "./backend_config";
+const backendBaseUrl = import.meta.env.VITE_BACKEND_BASE_URL as string;
+if (!backendBaseUrl) {
+  throw new Error("VITE_BACKEND_BASE_URL não configurada");
+}
 
 export interface AuthCheckResponse {
   status: "success" | "error" | "valid" | string;
@@ -11,7 +14,7 @@ export interface AuthCheckResponse {
 }
 
 // Endpoint publico do backend FastAPI para verificacao de sessao (backend faz proxy para o webhook)
-const AUTH_CHECK_URL = `${BACKEND_BASE_URL}/auth_check_user`;
+const AUTH_CHECK_URL = `${backendBaseUrl}/auth_check_user`;
 
 export async function checkAuth(): Promise<AuthCheckResponse> {
   try {
