@@ -264,7 +264,7 @@ async def chat_message_proxy(request: ChatRequest, raw_request: Request):
     Recebe a mensagem de texto do frontend e encaminha para o webhook do N8N.
     """
     try:
-        webhook_url = f"{WEBHOOK_TEST_BASE_URL}/message_input"
+        webhook_url = f"{WEBHOOK_BASE_URL}/message_input"
         print(f"[CHAT] → Encaminhando mensagem para N8N em {webhook_url}")
 
         # Tenta descobrir a origem: primeiro do body, depois do header
@@ -398,7 +398,7 @@ async def websocket_voice(websocket: WebSocket):
                     # 🚀 Envia a mensagem ao webhook
                     # Ajustado para usar "comando" para consistência com o módulo de texto
                     async with session.post(
-                        f"{WEBHOOK_TEST_BASE_URL}/message_input",
+                        f"{WEBHOOK_BASE_URL}/message_input",
                         json={
                             "comando": data,
                             "origin": "voice_module",
