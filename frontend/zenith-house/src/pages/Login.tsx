@@ -86,17 +86,7 @@ const Login = () => {
             {isLoading ? "Logging in..." : "Log In"}
           </button>
         </form>
-
-        {/* Link para Register */}
-        <p className="mt-6 text-center text-sm text-muted-foreground">
-          Don’t have an account?{" "}
-          <button
-            onClick={() => navigate("/register")}
-            className="text-primary hover:underline"
-          >
-            Sign up
-          </button>
-        </p>
+        
       </div>
     </div>
   );
