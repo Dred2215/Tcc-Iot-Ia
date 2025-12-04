@@ -398,7 +398,7 @@ async def websocket_voice(websocket: WebSocket):
                     # 🚀 Envia a mensagem ao webhook
                     # Ajustado para usar "comando" para consistência com o módulo de texto
                     async with session.post(
-                        WEBHOOK_TEST_BASE_URL,
+                        f"{WEBHOOK_TEST_BASE_URL}/message_input",
                         json={
                             "comando": data,
                             "origin": "voice_module",
