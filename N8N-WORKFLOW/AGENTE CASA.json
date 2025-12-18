@@ -1,0 +1,1681 @@
+{
+  "name": "AGENTE CASA",
+  "nodes": [
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Interprete esse comando: {{ $json.Command }}\n\nCaso o de cima esteja null use esse: {{ $json.body.comando }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "=Você é um agente especializado em IoT, responsável por interpretar mensagens de usuários.\nSeu nome é Bob, e você atua como um assistente de voz inteligente que interpreta comandos para controle de dispositivos.\nSua função é identificar se a mensagem é um comando IoT ou apenas uma interação geral.\nVocê não deve responder perguntas fora do escopo de IoT ou interações sociais simples.\n\nSempre que o nome \"Bob\" for mencionado na mensagem, considere que ele serve apenas como palavra de ativação — não como parte do comando.\nExemplo:\n\n\"Bob, ligue a luz\" → deve ser interpretado como \"ligue a luz\".\n\n\"Oi Bob\" → é uma interação geral.\n\n\"Bob, como você está?\" → trate como uma interação social simples.\n\nParte 1: Detecção de Contexto\n\nSe a mensagem do usuário contiver instruções de controle de dispositivos (ex.: ligar luz, abrir portão, ajustar temperatura), siga as regras da Parte 2 (formato IoT).\n\nSe a mensagem for uma pergunta ou interação que não se refere a nenhum dispositivo/ação IoT (ex.: \"como você está?\", \"qual é a capital da França?\", \"bom dia\"), siga a Parte 3 (formato geral).\n\nNunca misture os dois formatos na mesma resposta. Escolha somente um.\n\nParte 2: Regras para IoT\nVocabulário controlado\n\nDispositivos aceitos:\n\nlampada\n\nportao\n\nsensor_portao\n\ncontrole_irrf\n\nAções permitidas por dispositivo:\n\nlampada: ligar, desligar, ajustar_brilho, ajustar_temperatura, definir_cor, definir_modo, definir_cena, definir_musica\n\nportao: abrir, fechar, parar, travar, destravar, acionar\n\nsensor_portao: verificar_estado\n\ncontrole_irrf: enviar_comando, aprender_comando\n\nO foco principal é interpretar e executar corretamente comandos de ativação de dispositivos.\nO nome “Bob” nunca deve interferir na interpretação do comando.\nSe “Bob” aparecer na frase, ignore-o e processe apenas o comando de controle (ex.: \"ligar luz\", \"abrir portão\", etc.).\n\n🔧 Regras específicas por dispositivo\n💡 Lampada\n\nSuporta as ações ligar, desligar, ajustar_brilho, ajustar_temperatura, definir_cor, definir_cena, definir_musica.\n\nAção ligar e desligar apenas mudam o estado de energia (switch_led).\n\najustar_brilho usa valor numérico entre \"10\" e \"1000\" (representando intensidade).\n\najustar_temperatura define tom branco quente ou frio (2000–7000 K).\n\ndefinir_cor recebe cor em nomes pré-definidos, convertendo internamente para HSV.\n\ndefinir_cena e definir_musica aceitam apenas valores válidos, e só devem ser usados se especificados explicitamente pelo usuário.\n\nExemplos de expressões válidas:\n\n“Bob, ligue a lâmpada da sala.”\n\n“Aumente o brilho da luz para 800.”\n\n“Deixe a luz vermelha.”\n\n🚪 Portao\n\nÉ um dispositivo acionado por cena (Portao → CenaBase).\n\nAção principal: acionar, que envia o comando de abertura/fechamento alternado.\n\nCaso o usuário diga “abrir portão”, “fechar portão” ou “abrir garagem”, interprete como acionar.\n\nExemplo:\n\n“Bob, abra o portão.” → { \"device\": \"portao\", \"action\": \"acionar\" }\n\n“Bob, feche a garagem.” → { \"device\": \"portao\", \"action\": \"acionar\" }\n\n“Travar” e “destravar” só devem ser aceitos se o dispositivo suportar cenas específicas para isso.\n\n\"parameter\": null, \"additional_condit\": \"0\".\n\n🔒 SensorPortao\n\nUsado apenas para consulta de estado, nunca para controle.\n\nAção permitida: verificar_estado.\n\nDeve ser acionado quando o usuário perguntar “o portão está aberto?”, “qual o estado do portão?”, “a garagem está fechada?”.\n\nExemplo:\n\n“Bob, o portão está aberto?” →\n{ \"device\": \"sensor_portao\", \"action\": \"verificar_estado\", \"parameter\": null, \"additional_condit\": \"0\" }\n\n🎮 Controle IR/RF (ControleIRRF)\n\nSuporta ações enviar_comando e aprender_comando.\n\nenviar_comando deve ser usado quando o usuário mencionar envio de sinal ou ligar/desligar dispositivo via controle remoto.\n\naprender_comando apenas se o usuário disser explicitamente que quer registrar ou “ensinar” um comando.\n\nExemplo:\n\n“Bob, envie o comando IR para ligar o ventilador.” →\n{ \"device\": \"controle_irrf\", \"action\": \"enviar_comando\", \"parameter\": \"ligar_ventilador\", \"additional_condit\": \"0\" }\n\n“Bob, aprenda o comando do ar-condicionado.” →\n{ \"device\": \"controle_irrf\", \"action\": \"aprender_comando\", \"parameter\": \"ar_condicionado\", \"additional_condit\": \"0\" }\n\nNormalizações\n\nSinônimos de dispositivo:\n\nluz, iluminação, lâmpada, luminária → lampada\n\nportão, garagem, portão da garagem → portao\n\nsensor, sensor de portão, sensor da garagem → sensor_portao\n\ncontrole, controle remoto, controle universal, infravermelho, IR → controle_irrf\n\nSinônimos de ação:\n\nacender → ligar\n\napagar → desligar\n\nabrir → acionar (portao)\n\nfechar → acionar (portao)\n\nchecar, verificar, consultar → estado_portao (sensor_portao)\n\nTempos por extenso/relativos → inteiros em segundos, mas SEMPRE retornados como string:\n\n\"em quatro segundos\" → \"4\"\n\n\"em 2 minutos\" → \"120\"\n\n\"daqui a 1 hora\" → \"3600\"\n\nSe não houver condição adicional → use \"0\" (string literal \"0\").\n\nRegras de parâmetros\n\nA chave \"parameter\" deve ser usada apenas quando a ação exigir um valor:\n\ndefinir_cor → \"parameter\" recebe exclusivamente um dos nomes listados abaixo, em minúsculo, sem variações:\n[\"vermelho\", \"laranja\", \"amarelo\", \"verde\", \"ciano\", \"azul\", \"roxo\", \"rosa\", \"magenta\", \"branco\", \"cinza\", \"preto\"]\n\najustar_brilho → \"parameter\" recebe um valor numérico em string, ex.: \"500\".\n\najustar_temperatura → \"parameter\" recebe um valor numérico em string, ex.: \"23\".\n\nenviar_comando e aprender_comando → \"parameter\" recebe o nome do comando a enviar/aprender.\n\nPara ações como ligar, desligar, abrir, fechar, acionar, verificar_estado → não inclua \"parameter\" (ou use null).\n\nA chave \"additional_condit\" continua sendo exclusivamente o tempo em segundos:\n\nEx.: \"10\" → executar em 10 segundos.\n\nEx.: \"0\" → executar imediatamente.\n\nRegras de multi-ação\n\nSepare cláusulas por: vírgulas, ponto e vírgula, \" e \", \"depois\", \"em seguida\", \"e então\".\n\nSe a cláusula seguinte omitir o dispositivo, herde o último apenas se for inequívoco.\n\nSe a ação não existir para o dispositivo, descarte a cláusula (não produza comando inválido).\n\nSe houver comandos contraditórios para o mesmo dispositivo na mesma mensagem (ex.: abrir e fechar o portão), mantenha apenas o último comando explícito.\n\nFormato de saída IoT\n\nSempre retorne APENAS o objeto JSON válido, sem nenhum texto, comentário ou formatação extra.\nNÃO inclua markdown, ```json ou qualquer outro texto que não seja o próprio objeto JSON.\n\nFormato:\n{\n\"IOT_command\": [\n{\n\"device\": \"<dispositivo_padronizado>\",\n\"action\": \"<acao_padronizada>\",\n\"parameter\": <string ou null>,\n\"additional_condit\": \"string\"\n}\n],\n\"IOT_message\": \"mensagem amigável para o usuário sobre o que foi feito\"\n}\n\n\"parameter\" deve ser omitido ou null se a ação não exigir valor.\n\n\"additional_condit\" nunca pode ser nulo: deve ser \"0\" quando não houver tempo.\n\n\"IOT_message\" deve conter uma frase clara e natural explicando o que foi executado, ex.:\n\n\"O portão da garagem foi acionado com sucesso.\"\n\n\"A luz foi ligada imediatamente.\"\n\nUse linguagem natural e positiva, adequada para o usuário.\n\nVazio\n\nSe nada válido for identificado, retorne:\n{\n\"IOT_command\": [],\n\"IOT_message\": \"Nenhum comando válido identificado.\"\n}\n\nParte 3: Regras para Interação Geral\n\nQuando a mensagem não for sobre IoT, responda no seguinte formato:\n\n{\n\"type_message\": \"general\",\n\"message\": \"conteúdo_da_resposta_da_IA\"\n}\n\n\"message\" deve conter a resposta em linguagem natural, adequada ao usuário.\n\nExemplo de entrada: \"Bom dia!\"\n\nExemplo de saída:\n{\n\"type_message\": \"general\",\n\"message\": \"Bom dia! Espero que você esteja bem.\"\n}\n\nRegras finais\n\nSempre responda apenas com JSON válido.\n\nNunca misture formatos: se for IoT, use \"IOT_command\" e \"IOT_message\"; se for geral, use \"type_message\".\n\nNão escreva explicações ou texto fora do JSON.\n\nO nome Bob é sempre tratado como palavra de ativação, nunca como parte da instrução.\n\nSe a mensagem contiver apenas o nome “Bob”, retorne uma resposta geral do tipo:\n{\n\"type_message\": \"general\",\n\"message\": \"Ativado e pronto para receber comandos de dispositivos.\"\n}\n\nO foco principal é sempre interpretar corretamente comandos de ativação e controle de dispositivos IoT, respeitando as regras específicas de cada dispositivo listado."
+        }
+      },
+      "id": "899cf1e4-e918-4945-9a30-fb59460f3bb8",
+      "name": "AI Agent5",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.6,
+      "position": [
+        -1104,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.0-flash",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        -1136,
+        32
+      ],
+      "id": "d915bee5-4b23-4488-8e4a-69964fe77425",
+      "name": "Google Gemini Chat Model6",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "7BWc05siW5hdr3ns",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1a924eac-e49a-45b7-b715-1581a647b9b7",
+              "leftValue": "={{ $json.headers[\"user-agent\"] }}",
+              "rightValue": "python-requests/2.32.4",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            },
+            {
+              "id": "8103e080-d18f-41db-9d0a-eacd81cddf7d",
+              "leftValue": "={{ $json.headers.origin }}",
+              "rightValue": "http://localhost:8080",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            },
+            {
+              "id": "ea79be16-c190-48c7-b01b-a0af729d2ff2",
+              "leftValue": "={{ $json.headers.origin }}",
+              "rightValue": "https://tcc-iot-frontend-homolog.dlivfa.easypanel.host",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            },
+            {
+              "id": "f7c86bad-dbdb-4657-96a4-56c55e63d178",
+              "leftValue": "={{ $json.headers[\"user-agent\"] }}",
+              "rightValue": "=Python/3.13 aiohttp/3.13.1",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            },
+            {
+              "id": "27d559a6-0a33-4b5e-98cf-a55bda4102d1",
+              "leftValue": "={{ $json.body.origin }}",
+              "rightValue": "chat_module",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            },
+            {
+              "id": "c9f04aa4-3c79-4abb-b1ee-da8f97aee933",
+              "leftValue": "={{ $json.body.origin }}",
+              "rightValue": "voice_module",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1936,
+        224
+      ],
+      "id": "ddd14f39-78d9-4230-b162-ecb22d0f1821",
+      "name": "Verifica se a mensagem veio do python"
+    },
+    {
+      "parameters": {
+        "jsCode": "const modelOutput = $input.first().json.output;\n\n// 🟩 Pega o comando original digitado pelo usuário\nconst userCommand = $('Edit Fields9').first().json.body.comando || null;\n\n// 🟩 Expressão regular para encontrar o JSON dentro da string\nconst jsonMatch = modelOutput.match(/(\\{[\\s\\S]*\\})/);\n\nif (jsonMatch && jsonMatch[0]) {\n  try {\n    const parsedJson = JSON.parse(jsonMatch[0]);\n\n    // Caso 1️⃣: comandos IoT\n    if (parsedJson.IOT_command && Array.isArray(parsedJson.IOT_command)) {\n      parsedJson.IOT_command = parsedJson.IOT_command.map(cmd => {\n        return {\n          device: cmd.device || null,\n          action: cmd.action || null,\n          parameter: cmd.hasOwnProperty(\"parameter\") ? cmd.parameter : null,\n          additional_condit: cmd.additional_condit ? String(cmd.additional_condit) : \"0\"\n        };\n      });\n\n      // ✅ Retorna também o comando original\n      return {\n        json: {\n          type: \"IOT\",\n          user_command: userCommand,\n          ...parsedJson\n        }\n      };\n    }\n\n    // Caso 2️⃣: interação geral\n    if (parsedJson.type_message === \"general\") {\n      return {\n        json: {\n          type: \"general\",\n          user_command: userCommand,\n          message: parsedJson.message || \"\"\n        }\n      };\n    }\n\n    // Caso inesperado\n    throw new Error(\"Formato JSON não reconhecido: \" + JSON.stringify(parsedJson));\n\n  } catch (error) {\n    throw new Error(\"JSON extraído do modelo é inválido: \" + jsonMatch[0]);\n  }\n}\n\n// ❌ Nenhum JSON encontrado\nthrow new Error(\"Nenhum JSON encontrado na saída do modelo: \" + modelOutput);\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -704,
+        -176
+      ],
+      "id": "9d0d1908-be9e-406c-8dc0-c0ee32deff76",
+      "name": "Code2"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"type\": \"IOT\",\n  \"user_command\": \"{{ $json.user_command }}\",\n  \"content_message\": {\n    \"device\":\"{{ $json.IOT_command[0].device }}\",\n    \"action\":\"{{ $json.IOT_command[0].action }}\",\n    \"parameter\":\"{{ $json.IOT_command[0].parameter }}\",\n    \"additional_condit\":\"{{ $json.IOT_command[0].additional_condit }}\"\n  },\n  \"friendly_message\":\"{{ $json.IOT_message }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -224,
+        -80
+      ],
+      "id": "7b867918-3348-4196-a494-8ec69b37ce69",
+      "name": "Comandos IOT"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n\"type\":\"general\",\n\"content_message\":\"{{ $json.message }}\"\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -224,
+        -240
+      ],
+      "id": "116b2149-c029-4006-95e3-554af5ed7f7f",
+      "name": "Mensagens comuns"
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "key": "all_message_redis",
+        "value": "common_message"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        320,
+        -240
+      ],
+      "id": "7c23a926-2a00-4fc3-b1df-49d304a55506",
+      "name": "all_messages",
+      "credentials": {
+        "redis": {
+          "id": "pTjBRlKKTI0xNhtL",
+          "name": "TCC-memory"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "key": "iot_message_redis",
+        "value": "={{ $json.IOT_command }}"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        320,
+        -80
+      ],
+      "id": "d1c39c9b-7bea-45b6-b7ac-0901a3ae3cf7",
+      "name": "iot_messages",
+      "credentials": {
+        "redis": {
+          "id": "pTjBRlKKTI0xNhtL",
+          "name": "TCC-memory"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "47d801a7-7ecf-4b2b-8ac5-071edd4febfa",
+              "name": "IOT_command",
+              "value": "={{ $json.IOT_command }}",
+              "type": "string"
+            },
+            {
+              "id": "482d1d3d-5f26-4911-bb69-828ada7e8b21",
+              "name": "IOT_message",
+              "value": "={{ $json.IOT_message }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        96,
+        -80
+      ],
+      "id": "d5529a53-fbbf-4e39-b0f5-b3b85a57ac78",
+      "name": "Edit Fields4"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "68dd129a-ea6e-4375-b3dd-0fd3f3410107",
+              "name": "body.comando",
+              "value": "={{ $('input-message').item.json.body.comando }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1408,
+        -176
+      ],
+      "id": "b6f9bd04-5dc1-4c89-ab8d-35ce002df037",
+      "name": "Edit Fields9"
+    },
+    {
+      "parameters": {
+        "path": "response_ia_redis",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "961b54e0-135f-4f9f-bfc4-5440c55fa153",
+      "name": "python_call_redis",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1728,
+        -960
+      ],
+      "webhookId": "11084213-a5b1-4a06-aab1-717ba154fcf9"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "propertyName": "message",
+        "key": "iot_message_redis",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        -1440,
+        -960
+      ],
+      "id": "ec8cee65-05f4-4cc5-a5a5-a43b97af9b96",
+      "name": "Redis2",
+      "credentials": {
+        "redis": {
+          "id": "pTjBRlKKTI0xNhtL",
+          "name": "TCC-memory"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -832,
+        -960
+      ],
+      "id": "344b9b15-4cb0-43d2-8aa6-e39f3b9e8d58",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ad2a6b6f-b634-478c-96f1-65445ab9cc5d",
+              "name": "message",
+              "value": "={{ $json.message }}",
+              "type": "array"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1232,
+        -960
+      ],
+      "id": "9390824f-e192-41c1-adfc-5c4cdda6ff5c",
+      "name": "Edit Fields5"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "register-user",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1728,
+        -1184
+      ],
+      "id": "eb4232a7-afa1-4526-b379-eb8839f38646",
+      "name": "REGISTER-DB",
+      "webhookId": "5f6b8268-8c36-4444-afe0-e751586bbaae"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "9b73f917-fbb5-4ac0-aa43-f8a1dc0422fe",
+              "name": "body",
+              "value": "={{ $json.body }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1440,
+        -1184
+      ],
+      "id": "30de5ffb-c568-462e-918f-d56e6f15d71c",
+      "name": "Edit Fields6"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "certinho",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -832,
+        -1184
+      ],
+      "id": "996bdfcb-1a03-4427-b2ba-43eca5db0384",
+      "name": "Respond to Webhook1"
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "users",
+          "mode": "list",
+          "cachedResultName": "users"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "full_name": "={{ $json.body.user.full_name }}",
+            "email": "={{ $json.body.user.email }}",
+            "phone": "={{ $json.body.user.phone }}",
+            "password_hash": "={{ $json.body.credentials.password }}",
+            "created_at": "={{ $json.body.timestamp }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "full_name",
+              "displayName": "full_name",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "password_hash",
+              "displayName": "password_hash",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1216,
+        -1184
+      ],
+      "id": "07900576-0915-40f5-8f76-7a0bc2f39854",
+      "name": "Insert rows in a table",
+      "credentials": {
+        "postgres": {
+          "id": "Evd6WyIkiXfWJH2C",
+          "name": "IOT-TCC-DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "key": "=session_id - {{ $('session_id').item.json.session_id }}",
+        "value": "=autenticado-{{ $json.full_name }}",
+        "expire": true,
+        "ttl": 3600
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        -544,
+        -1376
+      ],
+      "id": "929c012a-a219-46f3-993b-9ed1bf279f8f",
+      "name": "Redis",
+      "credentials": {
+        "redis": {
+          "id": "pTjBRlKKTI0xNhtL",
+          "name": "TCC-memory"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ca4ea37e-fbd3-4472-a727-76d5dc8e5470",
+              "name": "body",
+              "value": "={{ $json.body }}",
+              "type": "object"
+            },
+            {
+              "id": "1de1c769-e559-4bda-9019-13a7c9013802",
+              "name": "session_id",
+              "value": "={{ $json.session_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1216,
+        -1376
+      ],
+      "id": "015e79b8-4be8-4341-80c2-3e4785823b32",
+      "name": "Edit Fields7"
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "users",
+          "mode": "list",
+          "cachedResultName": "users"
+        },
+        "where": {
+          "values": [
+            {
+              "column": "email",
+              "value": "={{ $json.body.email }}"
+            },
+            {
+              "column": "password_hash",
+              "value": "={{ $json.body.password }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -832,
+        -1376
+      ],
+      "id": "0ae29f20-1b92-4f68-88c4-b25ffc738a04",
+      "name": "Select rows from a table",
+      "credentials": {
+        "postgres": {
+          "id": "Evd6WyIkiXfWJH2C",
+          "name": "IOT-TCC-DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "login_user_webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1728,
+        -1376
+      ],
+      "id": "eb1a6daa-e304-4d2b-8c70-f038bae79123",
+      "name": "LOGIN-DB",
+      "webhookId": "36432197-e08e-42fa-a0bd-73286f54ab87"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "propertyName": "auth_ok",
+        "key": "=session_id - {{ $json.query.session_id }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        -1456,
+        -1552
+      ],
+      "id": "a80a00f4-c6e7-4a29-a3f9-0ed997a9545c",
+      "name": "Redis1",
+      "credentials": {
+        "redis": {
+          "id": "pTjBRlKKTI0xNhtL",
+          "name": "TCC-memory"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"success\",\n  \"message\": \"Login OK\",\n  \"id\": \"{{ $json.id }}\",\n  \"user\": \"{{ $json.full_name }}\",\n  \"session_id\": \"{{ $('Edit Fields7').item.json.session_id }}\"\n} ",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -336,
+        -1376
+      ],
+      "id": "be614048-bc6f-434b-be91-f1c3c5728b1c",
+      "name": "Respond to Webhook2"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "fa8e2513-e246-4145-b97b-94f0b34ee52f",
+              "name": "query.session_id",
+              "value": "={{ $json.query.session_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1680,
+        -1552
+      ],
+      "id": "dc4a656c-b75c-4f79-b78a-5d8a59bb9fd0",
+      "name": "Edit Fields8"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "aad47fce-9a3f-44d6-a596-72293a6022bc",
+              "leftValue": "={{ $json.message }}",
+              "rightValue": "autenticado",
+              "operator": {
+                "type": "string",
+                "operation": "startsWith"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -48,
+        -1552
+      ],
+      "id": "8b4134f9-ad20-489e-9410-3824e0dbc276",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"status\": \"error\",\n  \"message\": \"Sessão inválida ou expirada\"\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        240,
+        -1536
+      ],
+      "id": "fbbad3b4-8c8f-4316-abe6-d2030abd0e8b",
+      "name": "nao_logado"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"success\",\n  \"message\": \"{{ $json.message }}\",\n  \"type\":\"{{ $json.type }}\",\n  \"session_id\":\"{{ $json.session_id }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        240,
+        -1680
+      ],
+      "id": "b97bf4d7-c6fc-4f6c-9f1e-7788a94ae83f",
+      "name": "logado"
+    },
+    {
+      "parameters": {
+        "path": "check_user",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1856,
+        -1552
+      ],
+      "id": "0557d465-ea7e-4b9e-9ec0-ed2910e82157",
+      "name": "auth_check",
+      "webhookId": "96da2388-eac9-4c3a-b7f1-15cee4f6a044"
+    },
+    {
+      "parameters": {
+        "height": 1520,
+        "width": 2176
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1952,
+        -1872
+      ],
+      "id": "697790e8-7690-46ec-ba28-ca82ec5264a7",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "e50fda8a-c42f-48d8-87a8-94d9f62b382b",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1728,
+        -752
+      ],
+      "id": "9649fc24-dd5d-4032-9d7c-462845d353cc",
+      "name": "REGISTER EXECUTION",
+      "webhookId": "e50fda8a-c42f-48d8-87a8-94d9f62b382b"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "8cc82c60-6d52-4927-bc70-a841dee1de1b",
+              "name": "body",
+              "value": "={{ $json.body }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1456,
+        -752
+      ],
+      "id": "3acd0fa5-2d29-4c9e-8c1d-0634bdd7899b",
+      "name": "Edit Fields10"
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "device_logs",
+          "mode": "list",
+          "cachedResultName": "device_logs"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "user_message": "={{ $json.body.user_message }}",
+            "mensagem": "={{ $json.body.mensagem }}",
+            "tipo": "={{ $json.body.tipo }}",
+            "device": "={{ $json.body.device }}",
+            "action": "={{ $json.body.action }}",
+            "parameter": "={{ $json.body.comando.content_message.parameter }}",
+            "additional_condit": "={{ $json.body.comando.content_message.additional_condit }}",
+            "comando_raw": "={{ $json.body.comando }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "user_message",
+              "displayName": "user_message",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "mensagem",
+              "displayName": "mensagem",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tipo",
+              "displayName": "tipo",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "device",
+              "displayName": "device",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "action",
+              "displayName": "action",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "parameter",
+              "displayName": "parameter",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "additional_condit",
+              "displayName": "additional_condit",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "comando_raw",
+              "displayName": "comando_raw",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1232,
+        -752
+      ],
+      "id": "9da09a4a-e766-470f-b5c8-a6a79d498d45",
+      "name": "Insert rows in a table1",
+      "credentials": {
+        "postgres": {
+          "id": "Evd6WyIkiXfWJH2C",
+          "name": "IOT-TCC-DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "general",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "212e8c00-721a-4fb9-8673-337423ccf0d8"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "90dc4cfe-63a3-44f8-a17a-592839f18e2e",
+                    "leftValue": "={{ $json.IOT_command }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "array",
+                      "operation": "exists",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -480,
+        -176
+      ],
+      "id": "f8c7f310-498c-474e-a18f-52b4ed48bd27",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "message_input",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -2960,
+        -160
+      ],
+      "id": "071815a6-6f73-48d0-8270-ed3fab66fa97",
+      "name": "input-message",
+      "webhookId": "e50fda8a-c42f-48d8-87a8-94d9f62b382b"
+    },
+    {
+      "parameters": {
+        "action": "generate",
+        "dataPropertyName": "session_id"
+      },
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 1,
+      "position": [
+        -1440,
+        -1376
+      ],
+      "id": "ab092972-6a03-48e7-b64d-683aeea9ae01",
+      "name": "session_id"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "propertyName": "auth_ok",
+        "key": "=session_id - {{ $json.session_id }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        -2352,
+        -160
+      ],
+      "id": "54b817b4-c48a-40b5-88ff-8c2f8e841cd1",
+      "name": "Redis3",
+      "credentials": {
+        "redis": {
+          "id": "pTjBRlKKTI0xNhtL",
+          "name": "TCC-memory"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "00d03fbd-6390-4c2d-a0ea-be5666d2a284",
+              "name": "comando",
+              "value": "={{ $json.body.comando }}",
+              "type": "string"
+            },
+            {
+              "id": "abda5b43-67d4-4718-b190-7fde70e9d8b1",
+              "name": "origin",
+              "value": "={{ $json.body.origin }}",
+              "type": "string"
+            },
+            {
+              "id": "ea323ebb-b31f-4ee4-b0bf-55763fe83f1f",
+              "name": "session_id",
+              "value": "={{ $json.body.session_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2656,
+        -160
+      ],
+      "id": "ae34bf24-b082-4aab-b1f3-0cb1b059aa69",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "990d437d-f9f4-4c0b-a5bb-3c318f319d4e",
+              "leftValue": "={{ $json.auth_ok }}",
+              "rightValue": "autenticado",
+              "operator": {
+                "type": "string",
+                "operation": "startsWith"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -2144,
+        -160
+      ],
+      "id": "a63d664d-55bc-4a20-96a5-848ac251bb12",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"origin\": \"desconhecido, bloqueado\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -1776,
+        -48
+      ],
+      "id": "878f754c-1be7-4578-b1d2-50fc72a55ce4",
+      "name": "Comandos IOT1"
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "users",
+          "mode": "list",
+          "cachedResultName": "users"
+        },
+        "where": {
+          "values": [
+            {
+              "column": "full_name",
+              "value": "={{ $json.auth_ok.split('-').slice(1).join(':').trim() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1216,
+        -1552
+      ],
+      "id": "e8a51457-186b-4e5f-8864-b85689282420",
+      "name": "Select rows from a table1",
+      "credentials": {
+        "postgres": {
+          "id": "Evd6WyIkiXfWJH2C",
+          "name": "IOT-TCC-DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "key": "type_auth",
+        "value": "=\"message\":\"{{ $('Redis1').item.json.auth_ok }}\";\"type\":\"{{ $json.type }}\";\"session_id\":\"{{ $('Edit Fields8').item.json.query.session_id }}\""
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        -1008,
+        -1552
+      ],
+      "id": "1dec0189-ab6c-4656-bbb4-68189d8bd388",
+      "name": "Redis4",
+      "credentials": {
+        "redis": {
+          "id": "pTjBRlKKTI0xNhtL",
+          "name": "TCC-memory"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "propertyName": "credenciais",
+        "key": "type_auth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        -800,
+        -1552
+      ],
+      "id": "bf4f55ac-e9e8-4659-a3a2-1a705f34f1c2",
+      "name": "Redis5",
+      "credentials": {
+        "redis": {
+          "id": "pTjBRlKKTI0xNhtL",
+          "name": "TCC-memory"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "27782a30-855f-4c59-8a09-eeae31802b78",
+              "name": "credenciais",
+              "value": "={{ $json.credenciais }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -592,
+        -1552
+      ],
+      "id": "af18927b-075c-4cb1-a6c7-660820dee576",
+      "name": "Edit Fields1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Obtemos o valor vindo do input do nó anterior.                  // Pegamos o campo 'credenciais'\nconst rawString = $input.first().json.credenciais;                 // Armazena a string bruta para processamento\n\n// Primeiro, removemos todas as aspas externas que atrapalham.     // Deixa apenas o conteúdo útil\nconst cleaned = rawString.replace(/^\"+|\"+$/g, \"\");                 // Remove aspas extras no início/fim\n\n// Agora, dividimos a string pelo caractere ';'.                    // Cada parte representa um \"campo\":\"valor\"\nconst parts = cleaned.split(\";\").filter(Boolean);                  // Filtra itens vazios após split\n\n// Criamos um objeto final onde iremos armazenar os pares.          // Será o JSON estruturado\nconst result = {};                                                // Inicializa o objeto de saída\n\n// Para cada trecho, extraímos chave e valor.                       // A string está no padrão: \"campo\":\"valor\"\nfor (const part of parts) {                                       // Percorre cada item separado\n  const [key, value] = part.split(\":\");                           // Divide chave e valor\n  const formattedKey = key.replace(/\"/g, \"\").trim();              // Remove aspas extras da chave\n  const formattedValue = value.replace(/\"/g, \"\").trim();          // Remove aspas extras do valor\n  result[formattedKey] = formattedValue;                          // Armazena no objeto final\n}\n\n// Retornamos o objeto JSON estruturado.                            // Este será o output do nó Code\nreturn [{ json: result }];                                        // n8n sempre retorna array de objetos\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -384,
+        -1552
+      ],
+      "id": "0dbf9542-6b0a-4435-8ae3-e3e7453bda6d",
+      "name": "Code in JavaScript"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "AI Agent5": {
+      "main": [
+        [
+          {
+            "node": "Code2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model6": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent5",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verifica se a mensagem veio do python": {
+      "main": [
+        []
+      ]
+    },
+    "Comandos IOT": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensagens comuns": {
+      "main": [
+        [
+          {
+            "node": "all_messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields4": {
+      "main": [
+        [
+          {
+            "node": "iot_messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields9": {
+      "main": [
+        [
+          {
+            "node": "AI Agent5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "python_call_redis": {
+      "main": [
+        [
+          {
+            "node": "Redis2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis2": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields5": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "REGISTER-DB": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields6",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields6": {
+      "main": [
+        [
+          {
+            "node": "Insert rows in a table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert rows in a table": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields7": {
+      "main": [
+        [
+          {
+            "node": "Select rows from a table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select rows from a table": {
+      "main": [
+        [
+          {
+            "node": "Redis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LOGIN-DB": {
+      "main": [
+        [
+          {
+            "node": "session_id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis1": {
+      "main": [
+        [
+          {
+            "node": "Select rows from a table1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields8": {
+      "main": [
+        [
+          {
+            "node": "Redis1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "logado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "nao_logado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "auth_check": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields8",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "REGISTER EXECUTION": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields10",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields10": {
+      "main": [
+        [
+          {
+            "node": "Insert rows in a table1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code2": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Mensagens comuns",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Comandos IOT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "input-message": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "session_id": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields7",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis3": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Redis3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields9",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Comandos IOT1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select rows from a table1": {
+      "main": [
+        [
+          {
+            "node": "Redis4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis4": {
+      "main": [
+        [
+          {
+            "node": "Redis5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis5": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "9bad9113-9247-42ce-a843-2b05b0b9c1d7",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "4641a97d1822daba03e22d11ee3ce048e696911d91d54f9abc61d406559c9b22"
+  },
+  "id": "YuSt4hTFrnFu6t7g",
+  "tags": []
+}
