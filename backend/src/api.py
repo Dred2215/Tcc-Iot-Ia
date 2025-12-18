@@ -62,6 +62,13 @@ def log_event(tag: str, text: str, level: str = "INFO", **context: Any) -> None:
         ctx_text = f" | {safe_context}"
     print(f"[{level}] [{tag}] {text}{ctx_text}")
 
+async def _safe_websocket_close(websocket: WebSocket) -> None:
+    try:
+        if websocket.application_state == WebSocketState.CONNECTED:
+            await websocket.close()
+    except RuntimeError:
+        return
+
 # ==========================
 # 🧭 Variáveis de ambiente do projeto
 # ==========================
@@ -382,8 +389,7 @@ async def websocket_ping(websocket: WebSocket):
     except Exception as e:
         log_event("WS_PING", "Erro ou desconexão", level="WARN", error=str(e))
     finally:
-        if websocket.application_state != WebSocketState.DISCONNECTED:
-            await websocket.close()
+        await _safe_websocket_close(websocket)
         log_event("WS_PING", "Conexão encerrada")
 
 
@@ -410,8 +416,7 @@ async def websocket_hotword(websocket: WebSocket):
         log_event("WS_HOTWORD", "Erro ou desconexão", level="WARN", error=str(e))
 
     finally:
-        if websocket.application_state != WebSocketState.DISCONNECTED:
-            await websocket.close()
+        await _safe_websocket_close(websocket)
         log_event("WS_HOTWORD", "Conexão encerrada")
 
 
@@ -501,8 +506,7 @@ async def websocket_voice(websocket: WebSocket):
         log_event("WS_VOICE", "Erro ou desconexão", level="WARN", error=str(e))
 
     finally:
-        if websocket.application_state != WebSocketState.DISCONNECTED:
-            await websocket.close()
+        await _safe_websocket_close(websocket)
         log_event("WS_VOICE", "Conexão encerrada")
 
 
