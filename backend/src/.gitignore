@@ -30,3 +30,6 @@ dist-ssr
 .env.production
 
 automa-code-348d4b5cc3bd.json
+
+__pycache__/
+*.pyc

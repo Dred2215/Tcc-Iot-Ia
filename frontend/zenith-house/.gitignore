@@ -23,6 +23,10 @@ dist-ssr
 *.sln
 *.sw?
 
+__pycache__/
+*.pyc
+
+
 .env.development
 
 .env.production

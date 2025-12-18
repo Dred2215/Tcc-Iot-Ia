@@ -1,6 +1,13 @@
+const backendBaseUrl = import.meta.env.VITE_BACKEND_BASE_URL as string;
+if (!backendBaseUrl) {
+  throw new Error("VITE_BACKEND_BASE_URL não configurada");
+}
+
 export interface AuthCheckResponse {
   status: "success" | "error" | "valid" | string;
   message?: string;
+  type?: string;
+  session_id?: string;
   user?: {
     id: string;
     email: string;
@@ -8,21 +15,15 @@ export interface AuthCheckResponse {
   data?: any; // para capturar retorno do backend
 }
 
-const BACKEND_BASE_URL = (
-  (import.meta.env.VITE_BACKEND_BASE_URL as string | undefined)?.trim() ||
-  "http://localhost:8000"
-).replace(/\/$/, "");
-
-// Novo endpoint local do backend FastAPI
-const AUTH_CHECK_URL = `${BACKEND_BASE_URL}/auth_check_user`;
+// Endpoint publico do backend FastAPI para verificacao de sessao (backend faz proxy para o webhook)
+const AUTH_CHECK_URL = `${backendBaseUrl}/auth_check_user`;
 
 export async function checkAuth(): Promise<AuthCheckResponse> {
   try {
-    // ⚠️ Agora não pegamos nada do localStorage.
-    // O cookie HttpOnly é enviado automaticamente.
+    // Chamada ao backend confiando no cookie HttpOnly enviado pelo backend
     const response = await fetch(AUTH_CHECK_URL, {
       method: "GET",
-      credentials: "include", // 🔒 envia o cookie session_id
+      credentials: "include",
     });
 
     if (!response.ok) {
@@ -33,12 +34,23 @@ export async function checkAuth(): Promise<AuthCheckResponse> {
     const data = (await response.json()) as AuthCheckResponse;
     console.log("[AuthCheck]", data);
 
-    // Caso o backend use "valid" como status:
-    if (data.status === "valid" || data.status === "success") {
-      return { status: "success", user: data.user, data };
-    }
+    // Normaliza dados possivelmente aninhados (data.data)
+    const nested = (data as any)?.data || {};
+    const deepNested = (nested as any)?.data || {};
+    const resolvedType = data.type ?? nested.type ?? deepNested.type;
+    const resolvedUser = data.user ?? nested.user ?? deepNested.user;
+    const resolvedSession = data.session_id ?? nested.session_id ?? deepNested.session_id;
+    const resolvedStatus = data.status ?? nested.status ?? deepNested.status ?? "success";
+    const resolvedMessage = data.message ?? nested.message ?? deepNested.message;
 
-    return { status: "error", message: "Session invalid or expired" };
+    return {
+      status: resolvedStatus,
+      message: resolvedMessage,
+      type: resolvedType,
+      session_id: resolvedSession,
+      user: resolvedUser,
+      data,
+    };
   } catch (err: any) {
     console.error("[AuthCheck Error]", err);
     return { status: "error", message: err.message || "Network error" };

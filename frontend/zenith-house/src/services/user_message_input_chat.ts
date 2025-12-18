@@ -1,4 +1,5 @@
-import { getChatWebhookUrl } from "@/config/env";
+import { BACKEND_BASE_URL } from "./backend_config";
+import { WEBHOOK_BASE_URL } from "./backend_config";
 
 export interface WebhookResponseNormalized {
   comando: string;
@@ -6,9 +7,11 @@ export interface WebhookResponseNormalized {
   device?: string | null;
   action?: string | null;
   raw?: any;
+  iot_feedback?: any[];
 }
 
-const WEBHOOK_URL = getChatWebhookUrl();
+const WEBHOOK_URL = `${BACKEND_BASE_URL}/message_input`;
+const MESSAGE_ORIGIN = "chat_module";
 
 const getContentMessageText = (content: unknown): string | null => {
   if (!content) return null;
@@ -24,14 +27,14 @@ const getContentMessageText = (content: unknown): string | null => {
 
 export async function sendUserMessage(message: string): Promise<WebhookResponseNormalized> {
   try {
-    if (!WEBHOOK_URL) {
-      throw new Error("Endpoint do webhook não configurado. Verifique VITE_WEBHOOK_MESSAGE_CHAT_RESPONSE.");
-    }
-
     const res = await fetch(WEBHOOK_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ comando: message }),
+      headers: {
+        "Content-Type": "application/json",
+        "X-Origin": MESSAGE_ORIGIN, // ajuda o n8n a identificar a origem
+      },
+      credentials: "include", // ⚠️ envia e recebe cookies automaticamente
+      body: JSON.stringify({ comando: message, origin: MESSAGE_ORIGIN }),
     });
 
     if (!res.ok) {
@@ -39,18 +42,22 @@ export async function sendUserMessage(message: string): Promise<WebhookResponseN
     }
 
     const rawText = await res.text();
-    let data: any = {};
+    let parsed: any = {};
 
     if (rawText.trim().length === 0) {
       console.warn("[DEBUG] Webhook retornou resposta vazia.");
     } else {
       try {
-        data = JSON.parse(rawText);
+        parsed = JSON.parse(rawText);
       } catch (jsonError) {
         console.error("Erro ao converter resposta em JSON:", jsonError);
         throw new Error("Resposta inválida do servidor.");
       }
     }
+
+    // Se o backend envelopar como { data, iot_feedback }, extrai para manter compatibilidade
+    const iot_feedback = Array.isArray(parsed?.iot_feedback) ? parsed.iot_feedback : [];
+    const data = parsed && typeof parsed === "object" && "data" in parsed ? (parsed as any).data : parsed;
 
     console.log("[DEBUG] Resposta bruta da IA:", data);
 
@@ -101,6 +108,7 @@ export async function sendUserMessage(message: string): Promise<WebhookResponseN
       device,
       action,
       raw: data,
+      iot_feedback,
     };
   } catch (error) {
     console.error("Erro ao enviar mensagem:", error);

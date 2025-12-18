@@ -21,15 +21,6 @@ interface ChatMessageProps {
   message: Message;
 }
 
-// 🔗 Endpoint do backend configurável via VITE_BACKEND_BASE_URL
-const BACKEND_BASE_URL = (
-  (import.meta.env.VITE_BACKEND_BASE_URL as string | undefined)?.trim() ||
-  (typeof window !== "undefined" ? window.location.origin : "http://localhost:8000")
-).replace(/\/$/, "");
-
-const NOTIFY_ENDPOINT = `${BACKEND_BASE_URL}/notificar-mensagem-ia`;
-
-
 const ChatMessage = ({ message }: ChatMessageProps) => {
   const isUser = message.type === "user";
   return (
@@ -104,7 +95,7 @@ export const ChatInterface = () => {
       setIsLoading(true);
 
       try {
-        // 🚀 Envia comando para o n8n e recebe payload normalizado
+        // 🚀 Envia comando para o backend (/message_input) e recebe payload normalizado
         const response = await sendUserMessage(trimmedText);
         console.log("[DEBUG] Payload normalizado:", response);
 
@@ -117,54 +108,23 @@ export const ChatInterface = () => {
         };
         setMessages((prev) => [...prev, aiMessage]);
 
-        // 🧩 Monta payload completo para backend FastAPI
-        const backendPayload = {
-          user_message: response.comando,    // comando do usuário
-          mensagem: response.respostaIA,     // resposta da IA
-          comando: response.raw,             // estrutura bruta completa
-          tipo: response.device ? "IOT" : "general",
-          device: response.device,           // nome do dispositivo
-          action: response.action,           // ação executada
-        };
+        // Feedbacks IoT retornados diretamente na primeira chamada
+        const feedbacks = Array.isArray(response.iot_feedback) ? response.iot_feedback : [];
+        if (feedbacks.length > 0) {
+          const timestampBase = Date.now();
+          const feedbackMessages: Message[] = feedbacks
+            .filter((item: any) => typeof item?.message === "string" && item.message.trim().length > 0)
+            .map((item: any, index: number) => ({
+              id: `${timestampBase}-iot-${index}`,
+              text: item.message.trim(),
+              type: "ai",
+              timestamp: new Date(),
+            }));
 
-        console.log("[DEBUG] Enviando para backend:", backendPayload);
-
-        // 🔗 Envia notificação ao backend
-        const backendResponse = await fetch(NOTIFY_ENDPOINT, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(backendPayload),
-        });
-
-        const backendText = await backendResponse.text();
-        let backendResult: any = null;
-
-        if (backendText) {
-          try {
-            backendResult = JSON.parse(backendText);
-          } catch (parseError) {
-            console.error("[DEBUG] Falha ao converter resposta do backend:", parseError, backendText);
+          if (feedbackMessages.length > 0) {
+            console.log("[DEBUG] Feedback IoT recebido:", feedbackMessages);
+            setMessages((prev) => [...prev, ...feedbackMessages]);
           }
-        }
-
-        if (!backendResponse.ok) {
-          throw new Error(backendResult?.detail || "Falha ao notificar backend.");
-        }
-
-        const feedbacks = Array.isArray(backendResult?.iot_feedback) ? backendResult.iot_feedback : [];
-        const timestampBase = Date.now();
-        const feedbackMessages: Message[] = feedbacks
-          .filter((item: any) => typeof item?.message === "string" && item.message.trim().length > 0)
-          .map((item: any, index: number) => ({
-            id: `${timestampBase}-iot-${index}`,
-            text: item.message.trim(),
-            type: "ai",
-            timestamp: new Date(),
-          }));
-
-        if (feedbackMessages.length > 0) {
-          console.log("[DEBUG] Feedback IoT recebido:", feedbackMessages);
-          setMessages((prev) => [...prev, ...feedbackMessages]);
         }
 
       } catch (notificacaoError) {
