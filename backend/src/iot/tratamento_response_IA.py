@@ -3,7 +3,7 @@ import os
 from typing import Any, Optional
 
 from .dispositivos import ControleAr, Lampada, Portao, SensorPortao
-from .config_tuya import get_home_id, get_openapi
+from ..core.config_tuya import get_home_id, get_openapi
 
 # Containers vazios (serão preenchidos na inicialização)
 DISPOSITIVOS = {}

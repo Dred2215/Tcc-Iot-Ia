@@ -10,9 +10,9 @@ from contextlib import asynccontextmanager  # gerencia o ciclo de vida (startup/
 from typing import Optional, Any  # importa o tipo Optional para permitir tipar campos opcionais sem erro
 from sqlalchemy.orm import Session  # sessão de banco por requisição
 
-from .tratamento_response_IA import inicializar_dispositivos, processar_resposta # lógica de dispositivos
-from .ai_prompt import BOB_SYSTEM_PROMPT  # system prompt do agente de IA, enviado ao n8n a cada mensagem
-from .voice_transcription import TranscriptionError, transcrever_audio_bytes  # transcrição de áudio sob demanda
+from .iot.tratamento_response_IA import inicializar_dispositivos, processar_resposta # lógica de dispositivos
+from .core.ai_prompt import BOB_SYSTEM_PROMPT  # system prompt do agente de IA, enviado ao n8n a cada mensagem
+from .voice.voice_transcription import TranscriptionError, transcrever_audio_bytes  # transcrição de áudio sob demanda
 
 
 # ==========================
@@ -27,7 +27,7 @@ load_dotenv(load_env_path)  # lê as variáveis do arquivo .env e injeta em os.e
 
 # Importado depois do load_dotenv: monta DATABASE_URL/config do Redis a partir da env já carregada.
 from .db.session import engine, get_db  # engine e dependency de sessão de banco (SQLAlchemy)
-from .redis_session import test_connection as test_redis_connection  # healthcheck do Redis no startup
+from .core.redis_session import test_connection as test_redis_connection  # healthcheck do Redis no startup
 from .services.auth_service import (  # regras de cadastro e autenticação de usuário
     EmailAlreadyRegisteredError,
     InvalidCredentialsError,

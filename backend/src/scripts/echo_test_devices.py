@@ -2,7 +2,7 @@ import sys
 import os
 import asyncio
 
-from .config_tuya import get_home_id, get_openapi
+from ..core.config_tuya import get_home_id, get_openapi
 
 
 def _require_env(key: str) -> str:

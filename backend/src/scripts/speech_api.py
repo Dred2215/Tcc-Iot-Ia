@@ -11,7 +11,7 @@ from google.oauth2 import service_account
 SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
 
 # Caminhos das pastas
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 SECRET_DIR = BASE_DIR / "secret"
 AUDIO_DIR = BASE_DIR / "audio"
 CHECKED_AUDIO_DIR = BASE_DIR / "checked_audio"

@@ -3,7 +3,7 @@ import os
 import secrets
 from typing import Optional, TypedDict
 
-from ..redis_session import get_redis_client
+from ..core.redis_session import get_redis_client
 
 SESSION_KEY_PREFIX = "session_id:"
 

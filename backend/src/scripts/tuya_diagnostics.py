@@ -6,7 +6,7 @@ e tenta listar os dispositivos da conta, mesmo sem TUYA_UID/TUYA_HOME_ID
 configurados (nesse caso, ajuda a descobrir esses valores).
 """
 
-from . import config_tuya
+from ..core import config_tuya
 
 
 def _print_devices(devices: list) -> None:

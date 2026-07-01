@@ -10,7 +10,7 @@ from tuya_connector import TuyaOpenAPI
 # (ex: rodar `python -m src.config_tuya` isoladamente). Quando importado
 # via api.py, o .env já foi carregado antes por lá; load_dotenv aqui é
 # idempotente e não sobrescreve valores já presentes em os.environ.
-BASE_DIR = Path(__file__).resolve().parent.parent  # backend/
+BASE_DIR = Path(__file__).resolve().parent.parent.parent  # backend/
 load_dotenv(BASE_DIR / ".env")
 
 
