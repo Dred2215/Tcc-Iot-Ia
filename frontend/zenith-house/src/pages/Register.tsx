@@ -111,7 +111,7 @@ const Register = () => {
     try {
       const parsedData = result.data;
 
-      const webhookResult = await registerUser({
+      const registrationResult = await registerUser({
         fullName: parsedData.fullName,
         email: parsedData.email,
         password: parsedData.password,
@@ -119,13 +119,13 @@ const Register = () => {
       });
 
       setWebhookPreview({
-        request: JSON.stringify(webhookResult.requestPayload, null, 2),
-        response: JSON.stringify(webhookResult.responsePayload, null, 2),
+        request: JSON.stringify(registrationResult.requestPayload, null, 2),
+        response: JSON.stringify(registrationResult.responsePayload, null, 2),
       });
 
       toast({
         title: "Registro enviado",
-        description: webhookResult.responsePayload.message ?? "O webhook processou a solicitacao.",
+        description: `Usuario ${registrationResult.responsePayload.user?.email ?? parsedData.email} cadastrado com sucesso.`,
       });
 
       setFormState({
@@ -140,7 +140,7 @@ const Register = () => {
 
       toast({
         title: "Erro ao registrar",
-        description: "Nao foi possivel enviar os dados para o webhook. Tente novamente.",
+        description: error instanceof Error ? error.message : "Nao foi possivel cadastrar o usuario. Tente novamente.",
         variant: "destructive",
       });
     } finally {
@@ -301,12 +301,12 @@ const Register = () => {
             <div className="bg-gradient-card rounded-2xl p-6 shadow-card border border-border/50">
               <h2 className="text-lg font-semibold text-foreground mb-2">Fluxo de integracao</h2>
               <p className="text-sm text-muted-foreground leading-relaxed">
-                Os dados preenchidos sao serializados em um JSON padronizado e enviados ao webhook de integracao. O servico do banco recebe esse payload, processa o cadastro e responde com um status estruturado.
+                Os dados preenchidos sao enviados diretamente ao backend, que faz o hash da senha e persiste o cadastro no banco via SQLAlchemy, respondendo com um status estruturado.
               </p>
               <ul className="mt-4 space-y-2 text-sm text-muted-foreground">
                 <li className="flex items-center space-x-2">
                   <div className="w-2 h-2 bg-tech-blue rounded-full" />
-                  <span>Evento: <strong>user_registration</strong></span>
+                  <span>Endpoint: <strong>POST /register_user</strong></span>
                 </li>
                 <li className="flex items-center space-x-2">
                   <div className="w-2 h-2 bg-tech-blue rounded-full" />
@@ -314,7 +314,7 @@ const Register = () => {
                 </li>
                 <li className="flex items-center space-x-2">
                   <div className="w-2 h-2 bg-tech-blue rounded-full" />
-                  <span>Resposta do webhook exibida abaixo</span>
+                  <span>Resposta do backend exibida abaixo</span>
                 </li>
               </ul>
             </div>
@@ -325,7 +325,7 @@ const Register = () => {
                   <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">
                     Payload enviado
                   </h3>
-                  <pre className="max-h-60 overflow-auto rounded-xl bg-black/40 p-4 text-xs text-primary-foreground/80">
+                  <pre className="max-h-60 overflow-auto rounded-xl bg-black/40 p-4 text-xs text-foreground/80">
 {webhookPreview.request}
                   </pre>
                 </div>
@@ -333,7 +333,7 @@ const Register = () => {
                   <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">
                     Resposta recebida
                   </h3>
-                  <pre className="max-h-60 overflow-auto rounded-xl bg-black/40 p-4 text-xs text-primary-foreground/80">
+                  <pre className="max-h-60 overflow-auto rounded-xl bg-black/40 p-4 text-xs text-foreground/80">
 {webhookPreview.response}
                   </pre>
                 </div>

@@ -1,8 +1,11 @@
 import { ButtonCard } from "@/components/ButtonCard";
-import { Keyboard, Mic, UserPlus } from "lucide-react";
+import { Activity, Keyboard, Loader2, Mic, UserPlus } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { checkAuth } from "@/services/auth_user";
+import { checkStatus, formatStatusResult } from "@/services/status_check";
+
+type StatusState = "idle" | "loading" | "success" | "error";
 
 
 
@@ -12,6 +15,8 @@ const Home = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [userType, setUserType] = useState<string | undefined>(undefined);
+  const [statusState, setStatusState] = useState<StatusState>("idle");
+  const [statusResult, setStatusResult] = useState<string | null>(null);
 
   useEffect(() => {
     const hasRefreshed = sessionStorage.getItem("home_refreshed");
@@ -75,6 +80,23 @@ const Home = () => {
     event.preventDefault();
     localStorage.removeItem("auth_token");
     navigate("/login");
+  }
+
+  // Sonda de diagnostico: chama o webhook de status e mostra a resposta em tela.
+  // Trata loading, sucesso (2xx) e erro (falha de rede ou HTTP nao-2xx).
+  async function handleCheckStatus(): Promise<void> {
+    setStatusState("loading");
+    setStatusResult(null);
+
+    try {
+      const result = await checkStatus();
+      setStatusResult(formatStatusResult(result));
+      setStatusState(result.ok ? "success" : "error");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatusResult(`Falha ao consultar o status:\n${message}`);
+      setStatusState("error");
+    }
   }
   // Define os cards dinamicamente para que o layout se ajuste ao total exibido
   const cards = [
@@ -144,6 +166,43 @@ const Home = () => {
             <div className="w-2 h-2 bg-tech-blue rounded-full animate-pulse" />
             <span className="text-sm text-muted-foreground">System Online</span>
           </div>
+
+          {/* Sonda de status: valida se o backend consegue alcancar o webhook do n8n */}
+          <div className="mt-6 flex flex-col items-center">
+            <button
+              onClick={handleCheckStatus}
+              disabled={statusState === "loading"}
+              className="inline-flex items-center justify-center space-x-2 px-6 py-3 rounded-lg bg-gradient-accent text-primary-foreground font-semibold shadow-card hover:shadow-hover transition duration-200 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {statusState === "loading" ? (
+                <>
+                  <Loader2 className="animate-spin" size={20} />
+                  <span>Consultando status...</span>
+                </>
+              ) : (
+                <>
+                  <Activity size={20} />
+                  <span>Verificar Status</span>
+                </>
+              )}
+            </button>
+
+            {statusResult && (
+              <div className="mt-6 w-full max-w-2xl text-left">
+                <h3
+                  className={`text-sm font-semibold uppercase tracking-wide mb-2 ${
+                    statusState === "error" ? "text-destructive" : "text-tech-blue"
+                  }`}
+                >
+                  {statusState === "error" ? "Erro na consulta" : "Resposta do webhook"}
+                </h3>
+                <pre className="max-h-72 overflow-auto rounded-xl bg-black/40 p-4 text-xs text-foreground/80 whitespace-pre-wrap break-words">
+{statusResult}
+                </pre>
+              </div>
+            )}
+          </div>
+
           <div className="text-center mt-16">
             <div className="mt-4">
               <button
