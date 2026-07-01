@@ -1,5 +1,4 @@
 import { BACKEND_BASE_URL } from "./backend_config";
-import { WEBHOOK_BASE_URL } from "./backend_config";
 
 export interface WebhookResponseNormalized {
   comando: string;
@@ -69,7 +68,7 @@ export async function sendUserMessage(message: string): Promise<WebhookResponseN
     if (Array.isArray(data) && data.length > 0) {
       const obj = data[0];
       const contentText = getContentMessageText(obj.content_message);
-      respostaIA = contentText || obj.IOT_message || obj.friendly_message || "Comando processado.";
+      respostaIA = contentText || obj.IOT_message || obj.friendly_message || obj.message || "Comando processado.";
 
       // 📦 Se o retorno usa content_message
       if (obj.content_message) {
@@ -88,7 +87,12 @@ export async function sendUserMessage(message: string): Promise<WebhookResponseN
     // 🚀 Trata formato de objeto direto
     else if (typeof data === "object" && data !== null) {
       const contentText = getContentMessageText((data as any).content_message);
-      respostaIA = contentText || (data as any).IOT_message || (data as any).friendly_message || "Comando processado.";
+      respostaIA =
+        contentText ||
+        (data as any).IOT_message ||
+        (data as any).friendly_message ||
+        (data as any).message ||
+        "Comando processado.";
 
       if ((data as any).content_message) {
         device = (data as any).content_message.device || null;

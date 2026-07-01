@@ -1,28 +1,40 @@
 import json  # manipulação de dados e logs em JSON
 import os  # acesso às variáveis de ambiente do sistema
-import asyncio # programação assíncrona
 import httpx  # cliente HTTP assíncrono para chamar os webhooks do n8n
-import aiohttp # cliente HTTP assíncrono para websockets
 from pathlib import Path  # manipulação de caminhos de arquivo
 from urllib.parse import urlsplit, urlparse  # parsing de URLs para normalização de origens
-from fastapi import FastAPI, HTTPException, Response, Request, Body, WebSocket  # core do FastAPI
+from fastapi import Depends, FastAPI, HTTPException, Response, Request, Body, UploadFile, File  # core do FastAPI
 from fastapi.middleware.cors import CORSMiddleware  # middleware para liberar CORS
-from pydantic import BaseModel  # criação de DTOs de request/response pydantic
+from pydantic import BaseModel, EmailStr  # criação de DTOs de request/response pydantic
 from contextlib import asynccontextmanager  # gerencia o ciclo de vida (startup/shutdown)
 from typing import Optional, Any  # importa o tipo Optional para permitir tipar campos opcionais sem erro
-from starlette.websockets import WebSocketState # estados do websocket
+from sqlalchemy.orm import Session  # sessão de banco por requisição
 
 from .tratamento_response_IA import inicializar_dispositivos, processar_resposta # lógica de dispositivos
+from .ai_prompt import BOB_SYSTEM_PROMPT  # system prompt do agente de IA, enviado ao n8n a cada mensagem
+from .voice_transcription import TranscriptionError, transcrever_audio_bytes  # transcrição de áudio sob demanda
 
 
 # ==========================
 # 🗂️ Carregar variáveis do .env
 # ==========================
 
-BASE_DIR = Path(__file__).resolve().parent  # obtém diretório onde o arquivo api.py está localizado
-load_env_path = BASE_DIR / ".env"  # caminho para o arquivo .env na mesma pasta
+# backend/.env e a config real do projeto (nao backend/src/.env, que nao existe).
+BASE_DIR = Path(__file__).resolve().parent.parent  # obtém o diretório backend/ (um nível acima de src/)
+load_env_path = BASE_DIR / ".env"  # caminho para o arquivo .env em backend/
 from dotenv import load_dotenv  # carrega variável de ambiente do .env
 load_dotenv(load_env_path)  # lê as variáveis do arquivo .env e injeta em os.environ
+
+# Importado depois do load_dotenv: monta DATABASE_URL/config do Redis a partir da env já carregada.
+from .db.session import engine, get_db  # engine e dependency de sessão de banco (SQLAlchemy)
+from .redis_session import test_connection as test_redis_connection  # healthcheck do Redis no startup
+from .services.auth_service import (  # regras de cadastro e autenticação de usuário
+    EmailAlreadyRegisteredError,
+    InvalidCredentialsError,
+    authenticate_user,
+    register_user,
+)
+from .services.session_service import create_session, get_session  # sessão de login persistida no Redis
 
 # ==========================
 # 🧩 Funções auxiliares
@@ -60,30 +72,30 @@ def log_event(tag: str, text: str, level: str = "INFO", **context: Any) -> None:
         ctx_text = f" | {json.dumps(safe_context, ensure_ascii=False, default=str)}" if safe_context else ""
     except Exception:
         ctx_text = f" | {safe_context}"
-    print(f"[{level}] [{tag}] {text}{ctx_text}")
-
-async def _safe_websocket_close(websocket: WebSocket) -> None:
+    line = f"[{level}] [{tag}] {text}{ctx_text}"
     try:
-        if websocket.application_state == WebSocketState.CONNECTED:
-            await websocket.close()
-    except RuntimeError:
-        return
+        print(line)
+    except UnicodeEncodeError:
+        # Console do Windows (cp1252) nao suporta alguns emojis usados nas mensagens de log;
+        # sem esse fallback, o proprio log de erro derruba o handler de excecao.
+        print(line.encode("ascii", errors="backslashreplace").decode("ascii"))
 
 # ==========================
 # 🧭 Variáveis de ambiente do projeto
 # ==========================
 
-N8N_LOGIN_URL = os.getenv("N8N_LOGIN_URL")  # URL final do fluxo de login do n8n
-# Para testes, usamos o webhook fixo em vez de ler da env
-N8N_AUTH_CHECK = os.getenv("N8N_AUTH_CHECK")
+# N8N_LOGIN_URL e N8N_AUTH_CHECK nao sao mais usados: login e auth check
+# agora autenticam direto no Postgres/Redis (ver /login_user e /auth_check_user).
 N8N_LOG_WEBHOOK = os.getenv("N8N_LOG_WEBHOOK")  # webhook de log do n8n
+N8N_STATUS_CHECK = os.getenv("N8N_STATUS_CHECK")  # webhook de status usado pelo botão de diagnóstico do frontend
 WEBHOOK_BASE_URL = os.getenv("WEBHOOK_BASE_URL")  # base para compor rotas do n8n
 WEBHOOK_TEST_BASE_URL = os.getenv("WEBHOOK_TEST_BASE_URL")  # base de testes para compor rotas do n8n
-WEBHOOK_RECEIVE_MESSAGE = (
-    os.getenv("VITE_WEBHOOK_MESSAGE_CHAT_RESPONSE")
-    or os.getenv("WEBHOOK_MESSAGE_CHAT_RESPONSE")
-    or os.getenv("WEBHOOK_RECIVE_MESSAGE")
-)
+
+# Shared secret enviado em toda chamada a message_input (carrega comando + prompt).
+# Validado no n8n via "Header Auth" no node Webhook de entrada, para impedir
+# que a rota seja chamada diretamente por terceiros que descubram a URL.
+N8N_INTERNAL_SECRET_HEADER = os.getenv("N8N_INTERNAL_SECRET_HEADER", "X-Internal-Secret")
+N8N_INTERNAL_SECRET = os.getenv("N8N_INTERNAL_SECRET")
 
 if not WEBHOOK_BASE_URL:  # se faltar a base do n8n
     raise RuntimeError("❌ WEBHOOK_BASE_URL não configurado no backend/src/.env")  # aborta startup
@@ -98,17 +110,33 @@ WEBHOOK_BASE_URL = WEBHOOK_BASE_URL.rstrip("/")  # remove "/" do final para evit
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # gerencia startup e shutdown
-    log_event("STARTUP", "Servidor FastAPI iniciando...")
+    port = int(os.getenv("PORT", 8000))
+    log_event("STARTUP", "Servidor FastAPI iniciando...", port=port)
     log_event("STARTUP", "Webhook Base URL configurado", base_url=WEBHOOK_BASE_URL)
-    
+
+    # Testa conexão com o Postgres (SQLAlchemy)
+    try:
+        with engine.connect():
+            log_event("STARTUP", "Status Postgres: OK", port=port)
+    except Exception as e:
+        log_event("STARTUP", "Status Postgres: FALHA", level="WARN", error=str(e), port=port)
+
+    # Testa conexão com o Redis (sessão de login)
+    try:
+        redis_ok = test_redis_connection()
+        log_event("STARTUP", "Status Redis: OK", ping=redis_ok, port=port)
+    except Exception as e:
+        log_event("STARTUP", "Status Redis: FALHA", level="WARN", error=str(e), port=port)
+
     # Inicializa dispositivos Tuya
     try:
         inicializar_dispositivos()
     except Exception as e:
         log_event("STARTUP", "Erro ao inicializar dispositivos", level="WARN", error=str(e))
 
+    log_event("STARTUP", "Servidor FastAPI pronto", port=port)
     yield  # entrega execução para o app rodar
-    log_event("SHUTDOWN", "Servidor FastAPI finalizando...")
+    log_event("SHUTDOWN", "Servidor FastAPI finalizando...", port=port)
 
 app = FastAPI(lifespan=lifespan)  # cria o app principal
 
@@ -141,71 +169,105 @@ app.add_middleware(
 # 🧾 DTOs de request
 # ==========================
 
-class VoiceCommand(BaseModel):  # modelo de comando de voz em texto
-    message: str  # texto final reconhecido via STT no front
-
 class LoginRequest(BaseModel):  # modelo esperado no login
     email: str  # email a ser enviado pelo frontend
     password: str  # senha a ser enviada pelo frontend
 
+class RegisterUserRequest(BaseModel):  # modelo esperado no cadastro de usuário
+    full_name: str  # nome completo do usuário
+    email: EmailStr  # email único, usado no login
+    password: str  # senha em texto plano; é hasheada com bcrypt antes de persistir
+    phone: Optional[str] = None  # telefone é opcional
+
 # ==========================
-# 🔑 Endpoint: Login do Usuário via n8n
+# 👤 Endpoint: Criação de Usuário (backend é dono do cadastro)
+# ==========================
+
+@app.post("/register_user", status_code=201)
+async def register_user_endpoint(data: RegisterUserRequest, db: Session = Depends(get_db)):
+    """
+    Cria um novo usuário diretamente no Postgres via SQLAlchemy.
+    Substitui o fluxo antigo de cadastro via webhook n8n "register-user".
+    """
+    try:
+        user = register_user(
+            db,
+            full_name=data.full_name,
+            email=data.email,
+            password=data.password,
+            phone=data.phone,
+        )
+    except EmailAlreadyRegisteredError as e:
+        log_event("REGISTER", "Tentativa de cadastro com email já existente", level="WARN", email=data.email)
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception as e:
+        log_event("REGISTER", "Erro inesperado ao cadastrar usuário", level="ERROR", error=str(e))
+        raise HTTPException(status_code=500, detail="Erro interno ao cadastrar usuário")
+
+    log_event("REGISTER", "Usuário cadastrado com sucesso", user_id=str(user.id), email=user.email)
+
+    return {
+        "status": "success",
+        "user": {
+            "id": str(user.id),
+            "full_name": user.full_name,
+            "email": user.email,
+            "phone": user.phone,
+            "type": user.type,
+        },
+    }
+
+# ==========================
+# 🔑 Endpoint: Login do Usuário (Postgres + Redis, backend é dono da autenticação)
 # ==========================
 
 @app.post("/login_user")
-async def login_user(request: Request, response: Response, data: LoginRequest):  # endpoint que faz proxy de login para o n8n
+async def login_user(response: Response, data: LoginRequest, db: Session = Depends(get_db)):
+    """
+    Autentica o usuário direto no Postgres (bcrypt) e gera uma sessão no Redis.
+    Substitui o fluxo antigo de login via webhook n8n "login_user_webhook".
+    """
     try:
-        login_url = f"{WEBHOOK_BASE_URL}/login_user_webhook"  # compõe URL correta do n8n usando a base definida
-        log_event("LOGIN", "Chamando fluxo do n8n", url=login_url, email=data.email)
+        user = authenticate_user(db, email=data.email, password=data.password)
+    except InvalidCredentialsError:
+        log_event("LOGIN", "Credenciais inválidas", level="WARN", email=data.email)
+        raise HTTPException(status_code=401, detail="Email ou senha inválidos")
+    except Exception as e:
+        log_event("LOGIN", "Erro inesperado ao autenticar usuário", level="ERROR", error=str(e))
+        raise HTTPException(status_code=500, detail="Erro interno ao autenticar usuário")
 
-        async with httpx.AsyncClient(timeout=10.0) as client:  # cria cliente HTTP assíncrono
-            n8n_response = await client.post(
-                login_url,  # URL do fluxo de login no n8n
-                json={"email": data.email, "password": data.password},  # envia credenciais como JSON no body
-            )
-
-        if n8n_response.status_code != 200:  # se a autenticação falhar
-            log_event("LOGIN", "Credenciais inválidas no fluxo do n8n", level="WARN", status_code=n8n_response.status_code)
-            raise HTTPException(status_code=401, detail="❌ Credenciais inválidas no fluxo do n8n")  # devolve 401 ao cliente
-
-        result = n8n_response.json()  # converte resposta do n8n em JSON
-        session_id = result.get("session_id")  # extrai ID de sessão retornado
-        user_type = result.get("type")  # tipo de usuário retornado pelo n8n (admin/client)
-        status_value = result.get("status") or "success"  # status padronizado vindo do n8n
-        message_value = result.get("message")  # mensagem de retorno do fluxo
-
-        if not session_id:  # se não retornou session_id
-            log_event("LOGIN", "session_id não retornado pelo n8n", level="WARN", response=result)
-            raise HTTPException(status_code=401, detail="❌ session_id não retornado pelo n8n")  # aborta request
-
-        # salva o session_id como cookie seguro no navegador
-        # Esse cookie não pode ser lido via JS (HttpOnly) e só vai em HTTPS se secure=True
-        response.set_cookie(
-            key="session_id",  # nome do cookie
-            value=session_id,  # valor retornado pelo n8n
-            httponly=True,  # protege contra acesso JS
-            secure=True,  # necessário para permitir SameSite=None em requisições cross-site
-            samesite="none",  # permite envio do cookie em chamadas cross-site (frontend ↔ backend)
-            max_age=3600,  # dura 1h
+    try:
+        session_id = create_session(
+            user_id=str(user.id), email=user.email, full_name=user.full_name, user_type=user.type
         )
+    except Exception as e:
+        log_event("LOGIN", "Erro ao criar sessão no Redis", level="ERROR", error=str(e))
+        raise HTTPException(status_code=500, detail="Erro interno ao criar sessão")
 
-        log_event("LOGIN", "Login OK", status=status_value, user_type=user_type, user=result.get("user"))
+    # salva o session_id como cookie seguro no navegador
+    # Esse cookie não pode ser lido via JS (HttpOnly) e só vai em HTTPS se secure=True
+    response.set_cookie(
+        key="session_id",  # nome do cookie
+        value=session_id,  # valor gerado pelo backend
+        httponly=True,  # protege contra acesso JS
+        secure=True,  # necessário para permitir SameSite=None em requisições cross-site
+        samesite="none",  # permite envio do cookie em chamadas cross-site (frontend ↔ backend)
+        max_age=3600,  # dura 1h
+    )
 
-        return {
-            "status": status_value,
-            "message": message_value,
-            "type": user_type,
-            "session_id": session_id,
-            "user": result.get("user"),
-        }  # retorna login ok para o front
+    log_event("LOGIN", "Login OK", user_id=str(user.id), user_type=user.type, email=user.email)
 
-    except Exception as e:  # se algo inesperado acontecer
-        log_event("LOGIN", "Erro inesperado no proxy de login", level="ERROR", error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))  # devolve 500 ao cliente
+    return {
+        "status": "success",
+        "message": "Login OK",
+        "type": user.type,
+        "session_id": session_id,
+        "user": {"id": str(user.id), "email": user.email},
+    }
 
 
 # ==========================
-# 🕵️ Endpoint: Verifica sessão do usuário no n8n via cookie
+# 🕵️ Endpoint: Verifica sessão do usuário (Redis, backend é dono da validação)
 # ==========================
 
 @app.get("/auth_check_user")
@@ -232,18 +294,43 @@ async def auth_check_user(request: Request):  # endpoint para validar cookie de 
             log_event("AUTH_CHECK", "Session ausente", level="WARN")
             raise HTTPException(status_code=401, detail="❌ Cookie de sessão ausente")
 
-        # Envia session_id ao webhook do n8n para validação
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            n8n_response = await client.get(
-                N8N_AUTH_CHECK,
-                params={"session_id": session_id},
-                headers={"X-Session-Id": session_id},
-                cookies={"session_id": session_id},
-            )
+        session_data = get_session(session_id)
+        if not session_data:
+            log_event("AUTH_CHECK", "Sessão inválida ou expirada", level="WARN")
+            raise HTTPException(status_code=401, detail="Sessão inválida ou expirada")
 
-        # Propaga status/corpo do n8n para o frontend
+        data = {
+            "status": "success",
+            "message": "Sessão válida",
+            "type": session_data["type"],
+            "session_id": session_id,
+            "user": {"id": session_data["id"], "email": session_data["email"]},
+        }
+
+        log_event("AUTH_CHECK", "Sessão validada com sucesso", status=data.get("status"))
+        return data
+
+    except HTTPException:
+        # Propaga erros HTTP já tratados acima
+        raise
+    except Exception as e:
+        log_event("AUTH_CHECK", "Erro interno ao validar sessão", level="ERROR", error=str(e))
+        raise HTTPException(status_code=500, detail="Erro interno ao validar sessão")  # devolve 500
+
+# ==========================
+# 🩺 Endpoint: Proxy do webhook de status do n8n (sonda de diagnóstico do frontend)
+# ==========================
+
+@app.get("/status_check")
+async def status_check():  # endpoint que faz proxy do botão de status do frontend para o webhook do n8n
+    if not N8N_STATUS_CHECK:
+        raise HTTPException(status_code=500, detail="N8N_STATUS_CHECK não configurado no backend/.env")
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            n8n_response = await client.get(N8N_STATUS_CHECK)
+
         content_type = n8n_response.headers.get("content-type", "")
-        data = None
         if "application/json" in content_type:
             try:
                 data = n8n_response.json()
@@ -252,35 +339,45 @@ async def auth_check_user(request: Request):  # endpoint para validar cookie de 
         else:
             data = {"raw": n8n_response.text}
 
-        # Loga status e message retornados pelo n8n para debug
-        if isinstance(data, dict):
-            log_event("AUTH_CHECK", "Resposta n8n", status=data.get("status"), message=data.get("message"))
+        log_event("STATUS_CHECK", "Resposta do webhook de status", status_code=n8n_response.status_code)
 
-        if n8n_response.status_code >= 400:
-            raise HTTPException(status_code=n8n_response.status_code, detail=data)
-
-        log_event("AUTH_CHECK", "Sessão validada com sucesso", status=data.get("status") if isinstance(data, dict) else None)
-        return data
-
-    except HTTPException:
-        # Propaga erros HTTP já tratados acima (inclusive 4xx do n8n)
-        raise
-    except Exception as e:  # se houver falha na request ao n8n
-        log_event("AUTH_CHECK", "Erro interno ao validar sessão", level="ERROR", error=str(e))
-        raise HTTPException(status_code=500, detail="Erro interno ao validar sessão")  # devolve 500
-
-# ==========================
-# 🎙️ Endpoint: Envia comando de voz em texto reconhecido
-# ==========================
-
-@app.post("/voice_command")
-async def voice_command(req: VoiceCommand):  # endpoint que recebe texto final de voz
-    try:
-        log_event("VOICE_CMD", "Comando de voz recebido", message=req.message)
-        return {"status": "ok"}  # resposta simples de ping para o front
+        return {
+            "status": "success" if n8n_response.status_code < 400 else "error",
+            "http_status": n8n_response.status_code,
+            "data": data,
+        }
     except Exception as e:
-        log_event("VOICE_CMD", "Erro ao processar comando de voz", level="ERROR", error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))  # retorna erro 500
+        log_event("STATUS_CHECK", "Erro ao consultar webhook de status", level="ERROR", error=str(e))
+        raise HTTPException(status_code=502, detail=f"Erro ao consultar webhook de status: {e}")
+
+# ==========================
+# 🎙️ Endpoint: Transcrição de áudio gravado (substitui os WebSockets de voz)
+# ==========================
+
+@app.post("/voice_transcribe")
+async def voice_transcribe(audio: UploadFile = File(...)):
+    """
+    Recebe um arquivo de áudio gravado no navegador (MediaRecorder API),
+    transcreve usando o Google Speech Recognition público e devolve o texto.
+    O frontend usa esse texto no mesmo fluxo de chat de texto (/message_input).
+    """
+    try:
+        audio_bytes = await audio.read()
+        if not audio_bytes:
+            raise HTTPException(status_code=400, detail="Arquivo de áudio vazio")
+
+        texto = transcrever_audio_bytes(audio_bytes, filename_hint=audio.filename or "audio.webm")
+        log_event("VOICE_TRANSCRIBE", "Áudio transcrito com sucesso", transcribed_text=texto)
+        return {"status": "success", "text": texto}
+
+    except TranscriptionError as e:
+        log_event("VOICE_TRANSCRIBE", "Falha ao transcrever áudio", level="WARN", error=str(e))
+        raise HTTPException(status_code=422, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        log_event("VOICE_TRANSCRIBE", "Erro interno ao transcrever áudio", level="ERROR", error=str(e))
+        raise HTTPException(status_code=500, detail="Erro interno ao transcrever áudio")
 
 # ==========================
 # 🧪 Endpoint: Ping do backend
@@ -315,7 +412,16 @@ async def chat_message_proxy(request: ChatRequest, raw_request: Request):
         # Tenta descobrir a origem: primeiro do body, depois do header
         origin = request.origin or raw_request.headers.get("x-origin") or raw_request.headers.get("origin")
         session_id = raw_request.cookies.get("session_id") or raw_request.headers.get("x-session-id")
-        payload = {"comando": request.comando}
+
+        # O backend valida a sessão no Redis próprio ANTES de repassar ao n8n.
+        # O n8n não tem acesso a esse Redis, então não precisa (nem deve) validar sessão.
+        if not session_id or not get_session(session_id):
+            log_event("CHAT", "Sessão ausente ou inválida", level="WARN")
+            raise HTTPException(status_code=401, detail="Sessão inválida ou expirada")
+
+        # O backend é o dono do system prompt do agente (Bob); o n8n recebe
+        # o prompt já pronto e o repassa para o node AI Agent como system prompt.
+        payload = {"comando": request.comando, "prompt": BOB_SYSTEM_PROMPT}
         if origin:
             payload["origin"] = origin
         if session_id:
@@ -324,6 +430,8 @@ async def chat_message_proxy(request: ChatRequest, raw_request: Request):
         headers = {"X-Origin": origin} if origin else {}
         if session_id:
             headers["X-Session-Id"] = session_id
+        if N8N_INTERNAL_SECRET:
+            headers[N8N_INTERNAL_SECRET_HEADER] = N8N_INTERNAL_SECRET
 
         # Encaminha para o N8N com cabeçalho opcional de origem
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -343,8 +451,12 @@ async def chat_message_proxy(request: ChatRequest, raw_request: Request):
         except json.JSONDecodeError:
             return {"raw_response": n8n_response.text}
 
+        # O n8n pode responder um dict direto ou um array com um único item;
+        # normaliza para checar o "type" independente do formato recebido.
+        n8n_item = n8n_json[0] if isinstance(n8n_json, list) and n8n_json else n8n_json
+
         # Se for resposta geral, apenas devolve para o frontend sem processar IoT
-        if isinstance(n8n_json, dict) and str(n8n_json.get("type")).lower() == "general":
+        if isinstance(n8n_item, dict) and str(n8n_item.get("type")).lower() == "general":
             return {
                 "data": n8n_json,
                 "iot_feedback": [],
@@ -365,149 +477,12 @@ async def chat_message_proxy(request: ChatRequest, raw_request: Request):
             "iot_feedback": iot_feedback,
         }
 
+    except HTTPException:
+        # Propaga erros HTTP já tratados acima (ex: 401 de sessão inválida, 4xx/5xx do n8n)
+        raise
     except Exception as e:
         log_event("CHAT", "Erro interno ao processar chat", level="ERROR", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
-
-
-# ======================================================
-# 👂 WebSocket HOTWORD (aguarda "bob" e encerra)
-# ======================================================
-@app.websocket("/ws-ping")
-async def websocket_ping(websocket: WebSocket):
-    """
-    WebSocket simples de ping/pong para testar conectividade.
-    Envia uma mensagem de confirmação na conexão e ecoa mensagens recebidas.
-    """
-    await websocket.accept()
-    try:
-        log_event("WS_PING", "Cliente conectado")
-        await websocket.send_text("conectado")
-        while True:
-            data = await websocket.receive_text()
-            await websocket.send_text(f"echo: {data}")
-    except Exception as e:
-        log_event("WS_PING", "Erro ou desconexão", level="WARN", error=str(e))
-    finally:
-        await _safe_websocket_close(websocket)
-        log_event("WS_PING", "Conexão encerrada")
-
-
-@app.websocket("/ws-hotword")
-async def websocket_hotword(websocket: WebSocket):
-    await websocket.accept()
-    log_event("WS_HOTWORD", "Cliente conectado")
-    await websocket.send_text("✅ Detector ativo. Diga 'bob' para iniciar comando.")
-
-    try:
-        while True:
-            data = await websocket.receive_text()
-            log_event("WS_HOTWORD", "Mensagem recebida", payload=data)
-
-            if "bob" in data.lower():
-                log_event("WS_HOTWORD", "Hotword detectada, encerrando conexão")
-                await websocket.send_text("🚀 Hotword detectada: 'bob'")
-                await asyncio.sleep(0.3)
-                break
-            else:
-                await websocket.send_text("🗣️ Aguardando hotword...")
-
-    except Exception as e:
-        log_event("WS_HOTWORD", "Erro ou desconexão", level="WARN", error=str(e))
-
-    finally:
-        await _safe_websocket_close(websocket)
-        log_event("WS_HOTWORD", "Conexão encerrada")
-
-
-# ======================================================
-# 🎙️ WebSocket VOICE (envia mensagem ao webhook e executa resposta)
-# ======================================================
-@app.websocket("/ws-voice")
-async def websocket_voice(websocket: WebSocket):
-    """
-    Recebe o comando completo do frontend e envia para o webhook
-    definido em WEBHOOK_RECEIVE_MESSAGE. Depois, envia o retorno para
-    o tratamento_response_IA.py, que executa o comando nos dispositivos.
-    """
-    await websocket.accept()
-    log_event("WS_VOICE", "Cliente conectado")
-    await websocket.send_text("🟢 Conexão de voz estabelecida com o servidor.")
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            while True:
-                # 🗣️ Recebe mensagem do frontend
-                data = await websocket.receive_text()
-                log_event("WS_VOICE", "Mensagem recebida", payload=data)
-
-                if not WEBHOOK_RECEIVE_MESSAGE:
-                    await websocket.send_text("⚠️ Nenhum webhook configurado no servidor (WEBHOOK_RECEIVE_MESSAGE).")
-                    continue
-
-                session_id = websocket.cookies.get("session_id") or ""
-
-                try:
-                    # 🚀 Envia a mensagem ao webhook
-                    # Ajustado para usar "comando" para consistência com o módulo de texto
-                    async with session.post(
-                        f"{WEBHOOK_BASE_URL}/message_input",
-                        json={
-                            "comando": data,
-                            "origin": "voice_module",
-                            "session_id": session_id or None,
-                        },
-                        headers={"X-Session-Id": session_id} if session_id else None,
-                        timeout=15,
-                    ) as resp:
-                        try:
-                            # 📡 Tenta decodificar resposta JSON
-                            response_json = await resp.json(content_type=None)
-                            resposta_formatada = json.dumps(response_json, indent=2, ensure_ascii=False)
-
-                            log_event(
-                                "WS_VOICE",
-                                "Resposta JSON recebida do webhook",
-                                status=resp.status,
-                                response=response_json,
-                            )
-                            await websocket.send_text(
-                                f"✅ Resposta do webhook ({resp.status}): {resposta_formatada}"
-                            )
-
-                            # Se o tipo for "general", apenas devolve a resposta do agente e não tenta processar comando
-                            if isinstance(response_json, dict) and str(response_json.get("type")).lower() == "general":
-                                continue
-
-                            # ⚙️ Envia resposta para tratamento e execução local
-                            feedbacks = await processar_resposta(response_json)
-                            if feedbacks:
-                                for feedback in feedbacks:
-                                    mensagem = feedback.get("message")
-                                    if mensagem:
-                                        await websocket.send_text(mensagem)
-
-                        except Exception:
-                            # Caso o retorno não seja JSON, envia texto cru
-                            response_text = await resp.text()
-                            log_event("WS_VOICE", "Resposta texto recebida do webhook", status=resp.status, response=response_text)
-                            await websocket.send_text(
-                                f"✅ Resposta do webhook ({resp.status}): {response_text}"
-                            )
-
-                except asyncio.TimeoutError:
-                    log_event("WS_VOICE", "Timeout ao enviar mensagem ao webhook", level="WARN")
-                    await websocket.send_text("⚠️ O webhook demorou para responder.")
-                except Exception as e:
-                    log_event("WS_VOICE", "Erro ao enviar mensagem ao webhook", level="ERROR", error=str(e))
-                    await websocket.send_text(f"⚠️ Erro ao enviar para o webhook: {e}")
-
-    except Exception as e:
-        log_event("WS_VOICE", "Erro ou desconexão", level="WARN", error=str(e))
-
-    finally:
-        await _safe_websocket_close(websocket)
-        log_event("WS_VOICE", "Conexão encerrada")
 
 
 if __name__ == "__main__":
