@@ -1,0 +1,9 @@
+baseknowledge/
+
+# Segredos reais de configuracao (nunca versionar; manter so .env.example)
+.env
+.env.*
+!.env.example
+backend/secret/
+__pycache__/
+*.pyc
