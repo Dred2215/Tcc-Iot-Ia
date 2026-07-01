@@ -4,7 +4,7 @@ import time
 from backend.src.tratamento_response_IA import processar_resposta
 
 # URL do webhook
-WEBHOOK_URL = "https://tcc-iot-n8n.dlivfa.easypanel.host/webhook/message_input"
+WEBHOOK_URL = "https://n8n.neryautoma.site/webhook-test/message_input"
 
 # Variável global para armazenar a última resposta da IA
 respostaIA = None  
