@@ -1,7 +1,8 @@
 import asyncio
+import os
 from typing import Any, Optional
 
-from .dispositivos import Lampada, Portao, SensorPortao
+from .dispositivos import ControleAr, Lampada, Portao, SensorPortao
 from .config_tuya import get_home_id, get_openapi
 
 # Containers vazios (serão preenchidos na inicialização)
@@ -20,12 +21,24 @@ def inicializar_dispositivos():
         "sensor_portao": SensorPortao("Sensor Portão", "eba6dbc576c6cb89d0ndap", openapi)  # ✅ novo dispositivo
     }
 
+    # O ar-condicionado (infrared_ac) é controlado via cenas Tap-to-Run
+    # (action_executor "irIssueVii"), não por DP direto no dispositivo.
+    ar_ligar_scene_id = os.getenv("TUYA_AR_ESCRITORIO_LIGAR_SCENE_ID")
+    ar_desligar_scene_id = os.getenv("TUYA_AR_ESCRITORIO_DESLIGAR_SCENE_ID")
+    if ar_ligar_scene_id and ar_desligar_scene_id:
+        DISPOSITIVOS["controle_irrf"] = ControleAr(
+            "Ar escritório", openapi, home_id, ar_ligar_scene_id, ar_desligar_scene_id
+        )
+
+    portao_scene_id = os.getenv("TUYA_PORTAO_SCENE_ID", "yp6IXiAOst5s66wX")
     CENAS = {
-        "portao": Portao("Portão Garagem", openapi, home_id, "yp6IXiAOst5s66wX")
+        "portao": Portao("Portão Garagem", openapi, home_id, portao_scene_id)
     }
 
     print("✅ Dispositivo 'Luz' inicializado.")
     print("✅ Dispositivo 'Sensor Portão' inicializado.")
+    if ar_ligar_scene_id and ar_desligar_scene_id:
+        print("✅ Dispositivo 'Ar escritório' (controle_irrf, via cenas) inicializado.")
     print("✅ Dispositivo de cena 'Portão Garagem' inicializado.")
     print("✅ Dispositivos e cenas inicializados.")
 
@@ -45,7 +58,9 @@ CORES_TUYA = {
     "preto":      {"h": 0,   "s": 0,    "v": 0}
 }
 
-def formatar_feedback(device_label: str, device_key: str, action: str, resultado: Any) -> Optional[str]:
+def formatar_feedback(
+    device_label: str, device_key: str, action: str, resultado: Any, parameter: Any = None
+) -> Optional[str]:
     nome = device_label or device_key or "dispositivo"
 
     if device_key == "sensor_portao" and action in {"verificar_estado", "estado_portao"}:
@@ -53,6 +68,13 @@ def formatar_feedback(device_label: str, device_key: str, action: str, resultado
             return f"O portão está {'aberto' if resultado else 'fechado'}."
         if resultado is None:
             return "Não foi possível determinar o estado do portão."
+
+    if device_key == "controle_irrf" and action == "enviar_comando" and isinstance(resultado, bool):
+        comando = (str(parameter) if parameter else "").strip().lower()
+        desligando = "deslig" in comando
+        if resultado:
+            return f"{nome}: {'desligado' if desligando else 'ligado'} com sucesso."
+        return f"{nome}: falha ao {'desligar' if desligando else 'ligar'}."
 
     if isinstance(resultado, bool):
         return f"{nome}: {'ativado' if resultado else 'desativado'}."
@@ -139,6 +161,11 @@ async def executar_comando(idx, cmd):
             if action == "definir_cor" and isinstance(parameter, str):
                 h, s, v = processar_cor(parameter)
                 metodo(h, s, v)
+            elif device == "controle_irrf" and parameter is not None and parameter != "":
+                # enviar_comando/aprender_comando recebem o nome do comando IR como string,
+                # não um valor numérico (diferente dos demais dispositivos).
+                resultado = metodo(parameter)
+                feedback = formatar_feedback(device_label or device, device, action_original, resultado, parameter)
             elif parameter is not None and parameter != "":
                 metodo(int(parameter))
                 feedback = f"Ação '{action_original}' executada em '{device_label or device}'."

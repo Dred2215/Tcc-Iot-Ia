@@ -92,6 +92,57 @@ class Portao(CenaBase):
         return self._acionar_cena()
 
 
+class ControleAr:
+    """
+    Ar-condicionado controlado via IR aprendido, mas acionado por CENAS
+    Tap-to-Run (action_executor "irIssueVii"), e não por DP direto no
+    dispositivo. Precisa de duas cenas: uma para ligar, outra para desligar.
+    """
+    def __init__(self, nome: str, openapi, home_id: str, scene_id_ligar: str, scene_id_desligar: str):
+        self.nome = nome
+        self.openapi = openapi
+        self.home_id = home_id
+        self.scene_id_ligar = scene_id_ligar
+        self.scene_id_desligar = scene_id_desligar
+        print(f"✅ Dispositivo de cena '{self.nome}' (ligar={scene_id_ligar}, desligar={scene_id_desligar}) inicializado.")
+
+    def _acionar_cena(self, scene_id: str) -> bool:
+        path = f"/v1.0/homes/{self.home_id}/scenes/{scene_id}/trigger"
+        try:
+            resp = self.openapi.post(path, None)
+            if resp.get("success"):
+                print(f"✅ Cena '{self.nome}' ({scene_id}) acionada com sucesso.")
+                return True
+
+            if resp.get("code") == 1004:
+                resp2 = self.openapi.post(path, {})
+                if resp2.get("success"):
+                    print(f"✅ Cena '{self.nome}' ({scene_id}) acionada com sucesso (fallback).")
+                    return True
+                print(f"❌ Falha ao acionar cena (fallback): {resp2}")
+                return False
+
+            print(f"❌ Falha ao acionar cena: {resp}")
+            return False
+        except Exception as e:
+            print(f"⚠️  Erro na requisição para acionar a cena: {e}")
+            return False
+
+    def enviar_comando(self, comando: str) -> bool:
+        """
+        Traduz o parametro do comando IoT (ex: 'ligar_ar', 'desligar_ar')
+        para a cena correspondente. Qualquer variação contendo 'deslig'
+        aciona a cena de desligar; o restante aciona a cena de ligar.
+        """
+        comando_normalizado = (comando or "").strip().lower()
+        if "deslig" in comando_normalizado:
+            return self._acionar_cena(self.scene_id_desligar)
+        return self._acionar_cena(self.scene_id_ligar)
+
+    def status(self):
+        print(f"ℹ️  O status de '{self.nome}' não pode ser consultado diretamente via API (controle por cena IR).")
+
+
 # 💡 Lâmpada inteligente
 class Lampada(DispositivoBase):
     def ligar(self): self._executar("switch_led", True)
@@ -125,7 +176,7 @@ class SensorPortao(DispositivoBase):
 
 # 🎮 Controle IR/RF universal
 class ControleIRRF(DispositivoBase):
-    def enviar_comando_ir(self, codigo_hex):
+    def enviar_comando(self, codigo_hex):
         self._executar("ir_send", codigo_hex)
-    def aprender_comando_ir(self, codigo_bruto):
+    def aprender_comando(self, codigo_bruto):
         self._executar("ir_study_code", codigo_bruto)
