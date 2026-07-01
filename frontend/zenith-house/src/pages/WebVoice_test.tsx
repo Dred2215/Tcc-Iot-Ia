@@ -1,329 +1,105 @@
-import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Mic, Square } from "lucide-react";
+import { useRef, useState } from "react";
+import { ArrowLeft, Loader2, Mic, Square } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { transcribeAudio } from "@/services/voice_transcription";
+import { sendUserMessage } from "@/services/user_message_input_chat";
 
-const WS_BASE = (import.meta.env.VITE_VOICE_WS_BASE as string)?.replace(/\/$/, "");
-if (!WS_BASE) {
-  throw new Error("VITE_VOICE_WS_BASE não configurada");
-}
-const buildVoiceWsUrl = (path: string): string => {
-  const finalPath = path.startsWith("/") ? path : `/${path}`;
-  return `${WS_BASE}${finalPath}`;
-};
-
-type WebhookPayload =
-  | {
-      type?: string;
-      friendly_message?: string;
-      content_message?:
-        | string
-        | {
-            friendly_message?: string;
-            message?: string;
-            text?: string;
-            status?: string;
-          };
-      IOT_message?: string;
-      message?: string;
-    }
-  | string;
-
-const extractWebhookMessage = (payload: WebhookPayload): string => {
-  if (!payload) return "";
-  if (typeof payload === "string") return payload;
-
-  const fromContent = payload.content_message;
-  if (fromContent) {
-    if (typeof fromContent === "string") return fromContent;
-    if (typeof fromContent === "object") {
-      if (typeof fromContent.friendly_message === "string") return fromContent.friendly_message;
-      if (typeof fromContent.message === "string") return fromContent.message;
-      if (typeof fromContent.text === "string") return fromContent.text;
-      if (typeof fromContent.status === "string") return fromContent.status;
-    }
-  }
-
-  if (typeof payload.friendly_message === "string") return payload.friendly_message;
-  if (typeof payload.IOT_message === "string") return payload.IOT_message;
-  if (typeof payload.message === "string") return payload.message;
-
-  return "";
-};
-
-const safeJsonParse = (text: string): WebhookPayload | null => {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-};
-
-const formatVoiceServerMessage = (raw: string): string => {
-  if (!raw) return "";
-
-  const trimmed = raw.trim();
-  const direct = safeJsonParse(trimmed);
-  if (direct) {
-    const msg = extractWebhookMessage(direct);
-    if (msg) return msg;
-  }
-
-  const jsonMatch = trimmed.match(/\{.*\}$/s);
-  if (jsonMatch) {
-    const parsedTail = safeJsonParse(jsonMatch[0]);
-    if (parsedTail) {
-      const msg = extractWebhookMessage(parsedTail);
-      if (msg) return msg;
-    }
-  }
-
-  return trimmed;
-};
+type VoiceState = "idle" | "recording" | "transcribing" | "processing";
 
 const Voice_STT_Test = () => {
   const navigate = useNavigate();
 
-
-  
-
-  // =====================================================
-  // 🎛️ Estados
-  // =====================================================
-  const [isListening, setIsListening] = useState(false);
+  const [voiceState, setVoiceState] = useState<VoiceState>("idle");
+  const [statusMessage, setStatusMessage] = useState("Clique no microfone para gravar um comando.");
   const [recognizedText, setRecognizedText] = useState("");
-  const [statusMessage, setStatusMessage] = useState("Inicializando...");
+  const [aiResponse, setAiResponse] = useState("");
+  const [error, setError] = useState("");
 
-  // =====================================================
-  // 🔗 Referências
-  // =====================================================
-  const recognitionRef = useRef<any | null>(null);
-  const socketRef = useRef<WebSocket | null>(null);
-  const isCommandMode = useRef(false);
-  const commandText = useRef("");
-  const commandTimer = useRef<any>(null);
-  const pingSocketRef = useRef<WebSocket | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
 
-  // ⏱️ Timer de 10s após detectar "bob"
-  const commandStartTimer = () => {
-    clearTimeout(commandTimer.current);
-    commandTimer.current = setTimeout(() => {
-      console.log("⏰ Tempo limite atingido — enviando comando final.");
-      finalizeCommand();
-    }, 10000); // 10 segundos
+  const stopStream = () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
   };
 
-  // 📨 Finaliza e envia o comando ao servidor
-  const finalizeCommand = () => {
-    clearTimeout(commandTimer.current);
+  const startRecording = async () => {
+    setError("");
+    setRecognizedText("");
+    setAiResponse("");
 
-    if (commandText.current.trim() !== "") {
-      sendVoiceCommand(commandText.current.trim());
-    } else {
-      console.warn("⚠️ Nenhum comando detectado.");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      chunksRef.current = [];
+
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          chunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        stopStream();
+        const audioBlob = new Blob(chunksRef.current, { type: "audio/webm" });
+        void handleRecordingFinished(audioBlob);
+      };
+
+      mediaRecorder.start();
+      setVoiceState("recording");
+      setStatusMessage("Gravando... clique novamente para parar.");
+    } catch (err) {
+      console.error("Erro ao acessar o microfone:", err);
+      setError("Não foi possível acessar o microfone. Verifique as permissões do navegador.");
     }
-
-    // Reset
-    isCommandMode.current = false;
-    commandText.current = "";
-    const recognition = recognitionRef.current;
-    if (recognition) recognition.stop();
   };
 
+  const stopRecording = () => {
+    mediaRecorderRef.current?.stop();
+  };
 
-  // =====================================================
-  // 🧠 Inicializa reconhecimento e WebSocket único
-  // =====================================================
-  useEffect(() => {
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+  const handleRecordingFinished = async (audioBlob: Blob) => {
+    setVoiceState("transcribing");
+    setStatusMessage("Transcrevendo áudio...");
 
-    if (!SpeechRecognition) {
-      alert("Seu navegador não suporta reconhecimento de voz (Web Speech API).");
+    try {
+      const texto = await transcribeAudio(audioBlob);
+      setRecognizedText(texto);
+
+      setVoiceState("processing");
+      setStatusMessage("Processando comando...");
+
+      const response = await sendUserMessage(texto);
+      setAiResponse(response.respostaIA || "Comando processado.");
+      setStatusMessage("Clique no microfone para gravar um novo comando.");
+    } catch (err) {
+      console.error("Erro no fluxo de voz:", err);
+      setError(err instanceof Error ? err.message : "Falha ao processar o áudio. Tente novamente.");
+      setStatusMessage("Clique no microfone para gravar um comando.");
+    } finally {
+      setVoiceState("idle");
+    }
+  };
+
+  const handleMicClick = () => {
+    if (voiceState === "recording") {
+      stopRecording();
       return;
     }
-
-    const recognition = new SpeechRecognition();
-    recognition.lang = "pt-BR";
-    recognition.continuous = true;
-    recognition.interimResults = true;
-
-    recognition.onstart = () => {
-      setIsListening(true);
-      console.log("🎙️ Reconhecimento iniciado.");
-      setStatusMessage("🎧 Escutando... diga 'bob' para ativar.");
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-      console.log("🛑 Reconhecimento finalizado.");
-      // Reinicia automaticamente a escuta
-      setTimeout(() => {
-        recognition.start();
-      }, 800);
-    };
-
-    recognition.onerror = (event: any) => {
-      console.error("⚠️ Erro no reconhecimento:", event.error);
-      setStatusMessage("❌ Erro no reconhecimento de voz.");
-    };
-
-    recognition.onresult = (event: any) => {
-      let text = "";
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        text += event.results[i][0].transcript;
-      }
-
-      text = text.trim().toLowerCase();
-      setRecognizedText(text);
-
-      // ================================
-      // 🔎 Detecção da hotword "bob"
-      // ================================
-      if (text.includes("bob") && !isCommandMode.current) {
-        console.log("🚀 Hotword detectada: bob");
-        setStatusMessage("🟢 Hotword detectada — aguardando comando...");
-        isCommandMode.current = true; // ativa modo comando
-        commandText.current = ""; // zera o buffer
-        commandStartTimer();
-      }
-
-      // Se já estamos no modo comando, acumular texto
-      if (isCommandMode.current) {
-        commandText.current = text;
-
-        // Se resultado final detectado antes do timeout
-        const lastResult = event.results[event.results.length - 1];
-        if (lastResult.isFinal) {
-          console.log("✅ Fala final detectada — enviando antes do timeout.");
-          finalizeCommand();
-        }
-      }
-    };
-
-
-    recognitionRef.current = recognition;
-    connectPing();
-    connectSocket();
-    recognition.start();
-
-    return () => {
-      recognition.stop();
-      socketRef.current?.close();
-      pingSocketRef.current?.close();
-    };
-  }, []);
-
-  // =====================================================
-  // 🔌 WebSocket de Ping (verifica conectividade)
-  // =====================================================
-  const connectPing = () => {
-    const ws = new WebSocket(`${WS_BASE}/ws-ping`);
-
-    ws.onopen = () => {
-      console.log("🔗 [PING] Conectado ao servidor");
-    };
-
-    ws.onmessage = (e) => {
-      console.log("📩 [PING]", e.data);
-      setStatusMessage(e.data);
-    };
-
-    ws.onclose = () => {
-      console.log("🔌 [PING] Conexão encerrada.");
-      pingSocketRef.current = null;
-    };
-
-    ws.onerror = (e) => {
-      console.error("⚠️ [PING] Erro", e);
-    };
-
-    pingSocketRef.current = ws;
+    if (voiceState === "idle") {
+      void startRecording();
+    }
   };
 
-  // =====================================================
-  // 🔌 WebSocket Único
-  // =====================================================
-  const connectSocket = () => {
-    const ws = new WebSocket(`${WS_BASE}/ws-hotword`);
-
-    ws.onopen = () => {
-      console.log("👂 [HOTWORD] Conectado ao servidor");
-      setStatusMessage("🎧 Detector ativo — diga 'bob' para iniciar comando.");
-    };
-
-    ws.onmessage = (e) => {
-      console.log("📩 [SERVER]", e.data);
-      setStatusMessage(e.data);
-    };
-
-    ws.onclose = () => {
-      console.log("🔌 [HOTWORD] Conexão encerrada — aguardando próxima hotword.");
-      setStatusMessage("🕓 Aguardando nova hotword...");
-      socketRef.current = null; // limpa o socket
-    };
-
-
-    ws.onerror = (e) => {
-      console.error("⚠️ [HOTWORD] Erro", e);
-      setStatusMessage("❌ Erro na conexão com o servidor.");
-    };
-
-    socketRef.current = ws;
-  };
-
-  // =====================================================
-  // 🔌 WebSocket de Comando (VOICE)
-  // =====================================================
-  const sendVoiceCommand = (text: string) => {
-    const ws = new WebSocket(`${WS_BASE}/ws-voice`);
-
-    ws.onopen = () => {
-      console.log("🎤 [VOICE] Conectado ao servidor.");
-      ws.send(text);
-      console.log("📤 [VOICE] Comando enviado:", text);
-      setStatusMessage("📨 Comando enviado ao servidor.");
-    };
-
-    ws.onmessage = (e: MessageEvent<string>) => {
-      console.log("🤖 [SERVER VOICE]", e.data);
-      const formatted = formatVoiceServerMessage(e.data);
-      setStatusMessage(formatted || e.data);
-    };
-
-    ws.onclose = () => {
-      console.log("🔌 [VOICE] Conexão encerrada.");
-    };
-
-    ws.onerror = (e) => {
-      console.error("⚠️ [VOICE] Erro:", e);
-      setStatusMessage("❌ Erro ao enviar comando ao servidor.");
-    };
-  };
-
-
-  // // =====================================================
-  // // 📤 Envia apenas a hotword
-  // // =====================================================
-  // const sendHotword = (text: string) => {
-  //   const ws = socketRef.current;
-  //   if (ws && ws.readyState === WebSocket.OPEN) {
-  //     ws.send(text);
-  //     console.log("📤 [CLIENTE] Enviado:", text);
-  //   } else {
-  //     console.warn("⚠️ WebSocket não está aberto.");
-  //     setStatusMessage("⚠️ Não foi possível enviar a hotword.");
-  //   }
-  // };
-
-  // =====================================================
-  // 🎨 Interface
-  // =====================================================
-  const buttonState = isListening ? "recording" : "idle";
+  const isBusy = voiceState === "transcribing" || voiceState === "processing";
 
   return (
     <div className="min-h-screen bg-gradient-primary">
       <div className="container mx-auto px-4 py-12">
-        {/* Botão Voltar */}
         <button
           onClick={() => navigate("/")}
           className="inline-flex items-center space-x-2 text-muted-foreground hover:text-foreground transition-colors duration-200 mb-8"
@@ -332,55 +108,42 @@ const Voice_STT_Test = () => {
           <span>Back to Home</span>
         </button>
 
-        {/* Cabeçalho */}
         <div className="text-center mb-16">
-          <h1 className="text-4xl font-bold text-foreground mb-4">
-            Voice Hotword Test
-          </h1>
+          <h1 className="text-4xl font-bold text-foreground mb-4">Voice Control</h1>
           <p className="text-lg text-muted-foreground max-w-md mx-auto">
-            A escuta começa automaticamente. Diga “bob” e a conexão será encerrada após o envio.
+            Clique no microfone, fale o comando e clique novamente para enviar.
           </p>
         </div>
 
-        {/* Status */}
         <div className="text-center mb-6">
           <p className="text-sm text-tech-blue">{statusMessage}</p>
+          {error && <p className="text-sm text-destructive mt-2">{error}</p>}
         </div>
 
-        {/* Texto reconhecido */}
         <div className="flex flex-col items-center space-y-4 mb-10">
           <textarea
             readOnly
             value={recognizedText}
+            placeholder="O texto transcrito aparecerá aqui..."
             className="w-96 h-40 p-4 rounded-lg border border-border/50 bg-background/50 text-foreground resize-none focus:outline-none"
           />
-          <p className="text-muted-foreground text-sm">Texto reconhecido em tempo real</p>
+          <p className="text-muted-foreground text-sm">Texto transcrito do último comando</p>
         </div>
 
-        {/* Botão principal */}
         <div className="flex flex-col items-center justify-center space-y-8">
           <button
-            onClick={() => {
-              const recognition = recognitionRef.current;
-              if (recognition) {
-                if (isListening) {
-                  recognition.stop();
-                  setStatusMessage("🛑 Escuta parada manualmente.");
-                } else {
-                  recognition.start();
-                  setStatusMessage("🎧 Escutando novamente...");
-                }
-                setIsListening(!isListening);
-              }
-            }}
-            className={`relative w-32 h-32 rounded-full transition-all duration-300 transform active:scale-95 ${
-              buttonState === "recording"
+            onClick={handleMicClick}
+            disabled={isBusy}
+            className={`relative w-32 h-32 rounded-full transition-all duration-300 transform active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed ${
+              voiceState === "recording"
                 ? "bg-gradient-hover shadow-glow animate-pulse"
                 : "bg-gradient-accent hover:bg-gradient-hover shadow-card hover:shadow-hover hover:scale-105"
             }`}
           >
             <div className="flex items-center justify-center w-full h-full">
-              {buttonState === "recording" ? (
+              {isBusy ? (
+                <Loader2 size={48} className="text-primary-foreground animate-spin" />
+              ) : voiceState === "recording" ? (
                 <Square size={48} className="text-primary-foreground" fill="currentColor" />
               ) : (
                 <Mic size={48} className="text-primary-foreground" />
@@ -389,8 +152,24 @@ const Voice_STT_Test = () => {
           </button>
 
           <p className="text-sm text-muted-foreground">
-            {isListening ? "Escutando automaticamente..." : "Clique para iniciar manualmente"}
+            {voiceState === "recording"
+              ? "Gravando... clique para parar e enviar"
+              : isBusy
+                ? "Aguarde..."
+                : "Clique para gravar um comando"}
           </p>
+
+          {/* Resposta do assistente (confirmação de ação ou resposta da IA) */}
+          {(aiResponse || isBusy) && (
+            <div className="w-full max-w-md bg-gradient-card rounded-2xl p-6 shadow-card border border-border/50 text-center">
+              <h3 className="text-sm font-semibold text-tech-blue uppercase tracking-wide mb-2">
+                Resposta do assistente
+              </h3>
+              <p className="text-sm text-foreground/90 leading-relaxed">
+                {isBusy ? "Aguardando resposta..." : aiResponse}
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </div>
